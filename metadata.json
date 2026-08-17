@@ -1,0 +1,6 @@
+{
+  "name": "影像生活 · 在线相册排版编辑器",
+  "description": "专业级双页画板、本地无损照片排版与裁剪的个性化相册定制系统",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
