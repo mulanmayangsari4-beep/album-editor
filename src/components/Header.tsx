@@ -10,17 +10,19 @@ import {
   FileCode,
   Eye,
   Save,
-  ShoppingCart,
-  Maximize2,
-  Grid,
   Check,
   Edit2,
   ChevronDown,
+  ChevronUp,
+  Printer,
 } from 'lucide-react';
-import { BookSpec, EditorViewConfig, SpacingConfig } from '../types/editor';
+import { BookSpec, ProductSpec, EditorViewConfig, SpacingConfig } from '../types/editor';
+import { PRODUCT_SPECS } from '../data/productSpecs';
+import { IconMultiPageGrid } from './MultiPageEditorModal';
 
 interface HeaderProps {
   bookSpec: BookSpec;
+  onSelectSpec?: (spec: ProductSpec) => void;
   projectName: string;
   onUpdateProjectName: (name: string) => void;
   viewConfig: EditorViewConfig;
@@ -32,13 +34,43 @@ interface HeaderProps {
   onUndo: () => void;
   onRedo: () => void;
   onOpenPreview: () => void;
+  onOpenPrintExport?: () => void;
+  onOpenMultiPage?: () => void;
   onAddImageSlot: () => void;
   onAddTextSlot: () => void;
   totalPageCount: number;
   hasSelectedSlots?: boolean;
   onLayerOrder?: (action: 'bringForward' | 'sendBackward' | 'bringToFront' | 'sendToBack') => void;
   onAutoFit?: () => void;
+  onSaveProject?: () => void;
+  onAddToCart?: () => void;
 }
+
+// 1:1 米莫印品 排序顶部主图标 (两个重叠圆角方块：左上后方、右下前方实白)
+const IconOrderMomo: React.FC<{ className?: string }> = ({ className = 'w-3.5 h-3.5' }) => (
+  <svg className={`${className} shrink-0`} viewBox="0 0 16 16" fill="none">
+    <rect
+      x="1.75"
+      y="1.75"
+      width="9"
+      height="9"
+      rx="1.5"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      fill="none"
+    />
+    <rect
+      x="5.25"
+      y="5.25"
+      width="9"
+      height="9"
+      rx="1.5"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      fill="white"
+    />
+  </svg>
+);
 
 // 1:1 米莫印品 图层排序矢量图标
 const IconBringForward: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
@@ -48,7 +80,7 @@ const IconBringForward: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="5.5"
       width="8"
       height="8"
-      rx="1"
+      rx="1.2"
       stroke={disabled ? '#d1d5db' : '#9ca3af'}
       strokeWidth="1.2"
       fill="none"
@@ -58,7 +90,7 @@ const IconBringForward: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="2.5"
       width="8"
       height="8"
-      rx="1"
+      rx="1.2"
       stroke={disabled ? '#9ca3af' : '#333333'}
       strokeWidth="1.3"
       fill="white"
@@ -73,7 +105,7 @@ const IconSendBackward: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="2.5"
       width="8"
       height="8"
-      rx="1"
+      rx="1.2"
       stroke={disabled ? '#d1d5db' : '#9ca3af'}
       strokeWidth="1.2"
       fill="white"
@@ -83,7 +115,7 @@ const IconSendBackward: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="5.5"
       width="8"
       height="8"
-      rx="1"
+      rx="1.2"
       stroke={disabled ? '#9ca3af' : '#333333'}
       strokeWidth="1.3"
       fill="none"
@@ -98,7 +130,7 @@ const IconBringToFront: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="6.5"
       width="7"
       height="7"
-      rx="0.8"
+      rx="1"
       stroke={disabled ? '#e5e7eb' : '#d1d5db'}
       strokeWidth="1"
       fill="none"
@@ -108,7 +140,7 @@ const IconBringToFront: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="4.5"
       width="7"
       height="7"
-      rx="0.8"
+      rx="1"
       stroke={disabled ? '#d1d5db' : '#9ca3af'}
       strokeWidth="1"
       fill="white"
@@ -118,7 +150,7 @@ const IconBringToFront: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="2.5"
       width="7"
       height="7"
-      rx="0.8"
+      rx="1"
       stroke={disabled ? '#9ca3af' : '#333333'}
       strokeWidth="1.3"
       fill="white"
@@ -133,7 +165,7 @@ const IconSendToBack: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="6.5"
       width="7"
       height="7"
-      rx="0.8"
+      rx="1"
       stroke={disabled ? '#9ca3af' : '#333333'}
       strokeWidth="1.3"
       fill="none"
@@ -143,7 +175,7 @@ const IconSendToBack: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="4.5"
       width="7"
       height="7"
-      rx="0.8"
+      rx="1"
       stroke={disabled ? '#d1d5db' : '#9ca3af'}
       strokeWidth="1"
       fill="white"
@@ -153,7 +185,7 @@ const IconSendToBack: React.FC<{ disabled?: boolean }> = ({ disabled }) => (
       y="2.5"
       width="7"
       height="7"
-      rx="0.8"
+      rx="1"
       stroke={disabled ? '#e5e7eb' : '#d1d5db'}
       strokeWidth="1"
       fill="white"
@@ -174,12 +206,17 @@ export const Header: React.FC<HeaderProps> = ({
   onUndo,
   onRedo,
   onOpenPreview,
+  onOpenPrintExport,
+  onOpenMultiPage,
   onAddImageSlot,
   onAddTextSlot,
   totalPageCount,
   hasSelectedSlots = false,
   onLayerOrder,
   onAutoFit,
+  onSaveProject,
+  onAddToCart,
+  onSelectSpec,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(projectName);
@@ -214,11 +251,13 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleSave = () => {
     setIsSaved(true);
+    onSaveProject?.();
     setTimeout(() => setIsSaved(false), 2000);
   };
 
   const handleAddToCart = () => {
     setCartSuccess(true);
+    onAddToCart?.();
     setTimeout(() => setCartSuccess(false), 2500);
   };
 
@@ -283,29 +322,41 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {showSpecDropdown && (
-            <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-[#dadce0] rounded-md shadow-lg py-1 z-50 text-xs">
-              <div className="px-3 py-1.5 font-semibold text-neutral-500 border-b border-neutral-100">
-                可切换相册规格
+            <div className="absolute left-0 top-full mt-1 w-64 bg-white border border-[#dadce0] rounded-md shadow-lg py-1 z-50 text-xs animate-fade-in">
+              <div className="px-3 py-1.5 font-semibold text-neutral-500 border-b border-neutral-100 flex items-center justify-between">
+                <span>切换商品与印刷规格</span>
+                <span className="text-[10px] text-neutral-400 font-mono">毫米真值</span>
               </div>
-              <button
-                onClick={() => setShowSpecDropdown(false)}
-                className="w-full text-left px-3 py-2 hover:bg-[#faf4f5] flex items-center justify-between font-medium text-neutral-800"
-              >
-                <span>完美好翻书-方8 (20x20cm)</span>
-                <Check className="w-3.5 h-3.5 text-[#76383d]" />
-              </button>
-              <button
-                onClick={() => setShowSpecDropdown(false)}
-                className="w-full text-left px-3 py-2 hover:bg-neutral-50 flex items-center justify-between text-neutral-600"
-              >
-                <span>拾光精装册-方10 (25x25cm)</span>
-              </button>
-              <button
-                onClick={() => setShowSpecDropdown(false)}
-                className="w-full text-left px-3 py-2 hover:bg-neutral-50 flex items-center justify-between text-neutral-600"
-              >
-                <span>全景硬壳画册-A4横版 (28x21cm)</span>
-              </button>
+              {Object.values(PRODUCT_SPECS).map((spec) => {
+                const isSelected = spec.id === bookSpec.id;
+                return (
+                  <button
+                    key={spec.id}
+                    onClick={() => {
+                      onSelectSpec?.(spec);
+                      setShowSpecDropdown(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 flex items-start justify-between transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#faf4f5] text-[#76383d] font-medium'
+                        : 'hover:bg-neutral-50 text-neutral-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-medium">{spec.name}</span>
+                        <span className="text-[10px] px-1 bg-neutral-100 text-neutral-500 rounded border border-neutral-200">
+                          {spec.categoryName || spec.productType}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-neutral-400 font-mono mt-0.5">
+                        {spec.widthMm} x {spec.heightMm} mm (出血 {spec.bleedMm}mm)
+                      </div>
+                    </div>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-[#76383d] mt-1 shrink-0" />}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -316,14 +367,38 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* 中间快捷设计工具条 */}
-      <div className="hidden lg:flex items-center space-x-1 border-x border-[#e0e2e6] px-3">
+      {/* 中间快捷设计工具条 (紧凑精致) */}
+      <div className="hidden lg:flex items-center space-x-0.5 border-x border-[#e0e2e6] px-1.5">
+        {/* 插入图片框 */}
+        <button
+          id="btn-add-image-frame"
+          onClick={onAddImageSlot}
+          className="flex items-center space-x-1 px-1.5 py-1 rounded text-xs hover:bg-neutral-100 text-[#3c4043] transition-colors cursor-pointer"
+          title="在当前页面插入新图片框"
+        >
+          <ImageIcon className="w-3.5 h-3.5 text-neutral-600" />
+          <span>图片框</span>
+        </button>
+
+        {/* 插入文本框 (移动至左侧) */}
+        <button
+          id="btn-add-text-frame"
+          onClick={onAddTextSlot}
+          className="flex items-center space-x-1 px-1.5 py-1 rounded text-xs hover:bg-neutral-100 text-[#3c4043] transition-colors cursor-pointer"
+          title="在当前页面插入新文字框"
+        >
+          <Type className="w-3.5 h-3.5 text-neutral-600" />
+          <span>文本框</span>
+        </button>
+
+        <div className="w-[1px] h-3.5 bg-[#dadce0] mx-0.5" />
+
         {/* 撤销 / 重做 */}
         <button
           id="btn-header-undo"
           onClick={onUndo}
           disabled={!canUndo}
-          className={`flex items-center space-x-1 px-2 py-1 rounded text-xs transition-colors ${
+          className={`flex items-center space-x-1 px-1.5 py-1 rounded text-xs transition-colors ${
             canUndo ? 'hover:bg-neutral-100 text-[#3c4043] cursor-pointer' : 'text-neutral-300 cursor-not-allowed'
           }`}
           title="撤销 (Ctrl+Z)"
@@ -335,7 +410,7 @@ export const Header: React.FC<HeaderProps> = ({
           id="btn-header-redo"
           onClick={onRedo}
           disabled={!canRedo}
-          className={`flex items-center space-x-1 px-2 py-1 rounded text-xs transition-colors ${
+          className={`flex items-center space-x-1 px-1.5 py-1 rounded text-xs transition-colors ${
             canRedo ? 'hover:bg-neutral-100 text-[#3c4043] cursor-pointer' : 'text-neutral-300 cursor-not-allowed'
           }`}
           title="重做 (Ctrl+Y)"
@@ -344,45 +419,21 @@ export const Header: React.FC<HeaderProps> = ({
           <span>重做</span>
         </button>
 
-        <div className="w-[1px] h-4 bg-[#dadce0] mx-1" />
-
-        {/* 插入图片框 */}
-        <button
-          id="btn-add-image-frame"
-          onClick={onAddImageSlot}
-          className="flex items-center space-x-1 px-2 py-1 rounded text-xs hover:bg-neutral-100 text-[#3c4043] transition-colors cursor-pointer"
-          title="在当前页面插入新图片框"
-        >
-          <ImageIcon className="w-3.5 h-3.5 text-neutral-600" />
-          <span>图片框</span>
-        </button>
-
-        {/* 插入文本框 */}
-        <button
-          id="btn-add-text-frame"
-          onClick={onAddTextSlot}
-          className="flex items-center space-x-1 px-2 py-1 rounded text-xs hover:bg-neutral-100 text-[#3c4043] transition-colors cursor-pointer"
-          title="在当前页面插入新文字框"
-        >
-          <Type className="w-3.5 h-3.5 text-neutral-600" />
-          <span>文本框</span>
-        </button>
-
-        <div className="w-[1px] h-4 bg-[#dadce0] mx-1" />
+        <div className="w-[1px] h-3.5 bg-[#dadce0] mx-0.5" />
 
         {/* 排序 (1:1 还原米莫印品：点击弹出带尖角气泡菜单) */}
         <div className="relative" ref={orderMenuRef}>
           <button
             id="btn-header-layer-order"
             onClick={() => setShowOrderDropdown(!showOrderDropdown)}
-            className={`flex items-center space-x-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+            className={`flex items-center space-x-1 px-1.5 py-1 rounded text-xs transition-colors cursor-pointer ${
               showOrderDropdown
                 ? 'bg-[#faf4f5] text-[#76383d] font-medium'
                 : 'hover:bg-neutral-100 text-[#3c4043]'
             }`}
             title="图层层级排序"
           >
-            <Layers className={`w-3.5 h-3.5 ${showOrderDropdown ? 'text-[#76383d]' : 'text-neutral-600'}`} />
+            <IconOrderMomo className={`w-3.5 h-3.5 ${showOrderDropdown ? 'text-[#76383d]' : 'text-neutral-700'}`} />
             <span>排序</span>
             <ChevronDown className={`w-3 h-3 ${showOrderDropdown ? 'text-[#76383d] rotate-180' : 'text-neutral-400'} transition-transform`} />
           </button>
@@ -397,6 +448,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 id="btn-order-bring-forward"
                 disabled={!hasSelectedSlots}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onLayerOrder?.('bringForward');
                   setShowOrderDropdown(false);
@@ -416,6 +468,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 id="btn-order-send-backward"
                 disabled={!hasSelectedSlots}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onLayerOrder?.('sendBackward');
                   setShowOrderDropdown(false);
@@ -435,6 +488,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 id="btn-order-bring-to-front"
                 disabled={!hasSelectedSlots}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onLayerOrder?.('bringToFront');
                   setShowOrderDropdown(false);
@@ -454,6 +508,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 id="btn-order-send-to-back"
                 disabled={!hasSelectedSlots}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onLayerOrder?.('sendToBack');
                   setShowOrderDropdown(false);
@@ -492,19 +547,19 @@ export const Header: React.FC<HeaderProps> = ({
           <ChevronDown className="w-2.5 h-2.5 text-neutral-400" />
         </button>
 
-        <div className="w-[1px] h-4 bg-[#dadce0] mx-1" />
+        <div className="w-[1px] h-3.5 bg-[#dadce0] mx-0.5" />
 
-        {/* 顶部照片固定间距控制组件 (毫米 mm 选项与勾选状态开关) */}
+        {/* 顶部照片间距控制组件 (支持每点一下多增加/减少 1mm) */}
         <div
           id="toolbar-fixed-spacing-control"
-          className={`flex items-center space-x-2 px-2 py-1 rounded border transition-all text-xs select-none ${
+          className={`flex items-center space-x-1.5 px-1.5 py-0.5 rounded border transition-all text-xs select-none ${
             spacingConfig.enabled
               ? 'bg-[#faf4f5] border-[#d8b9be]/70 text-[#76383d]'
-              : 'bg-[#f8f9fa] border-[#dadce0] text-neutral-500'
+              : 'bg-[#f8f9fa] border-[#dadce0] text-neutral-600'
           }`}
         >
-          {/* 勾选框：开启/关闭固定间距对齐 */}
-          <label className="flex items-center space-x-1.5 cursor-pointer" title="勾选开启照片间距固定对齐，移动与缩放照片时自动保持设定间距；取消勾选可自由移动">
+          {/* 勾选框：开启/关闭照片间距对齐 */}
+          <label className="flex items-center space-x-1 cursor-pointer" title="勾选开启照片间距固定对齐，移动与缩放照片时自动保持设定间距；取消勾选可自由移动">
             <input
               type="checkbox"
               id="chk-fixed-spacing-enable"
@@ -512,72 +567,87 @@ export const Header: React.FC<HeaderProps> = ({
               onChange={(e) => onUpdateSpacingConfig?.({ enabled: e.target.checked })}
               className="w-3.5 h-3.5 rounded accent-[#76383d] cursor-pointer"
             />
-            <span className="font-medium text-xs">
-              固定间距
+            <span className="font-medium text-xs whitespace-nowrap">
+              照片间距
             </span>
           </label>
 
-          {/* 毫米输入框与单位 */}
-          <div className="flex items-center space-x-1 pl-1 border-l border-neutral-300/80">
-            <input
-              type="number"
-              id="input-fixed-spacing-mm"
-              min={0}
-              max={50}
-              step={0.5}
-              value={spacingConfig.gapMm}
-              disabled={!spacingConfig.enabled}
-              onChange={(e) => {
-                const val = Math.max(0, Math.min(50, parseFloat(e.target.value) || 0));
-                onUpdateSpacingConfig?.({ gapMm: val });
-              }}
-              className={`w-12 px-1 py-0.5 text-center text-xs font-mono rounded border outline-none transition-colors ${
-                spacingConfig.enabled
-                  ? 'bg-white border-[#d8b9be] text-[#76383d] font-semibold focus:ring-1 focus:ring-[#76383d]'
-                  : 'bg-neutral-100 border-neutral-200 text-neutral-400 cursor-not-allowed'
-              }`}
-              title="设置照片之间的固定间隙大小 (单位：毫米 mm)"
-            />
+          {/* 毫米输入框与单位 (支持每点一下多增加/减少 1mm) */}
+          <div className="flex items-center space-x-1 pl-1.5 border-l border-neutral-300/80">
+            <div className="relative flex items-center bg-white rounded border border-[#d8b9be] focus-within:ring-1 focus-within:ring-[#76383d] overflow-hidden">
+              <input
+                type="number"
+                id="input-fixed-spacing-mm"
+                min={0}
+                max={50}
+                step={1}
+                value={spacingConfig.gapMm}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(50, parseInt(e.target.value, 10) || 0));
+                  onUpdateSpacingConfig?.({ gapMm: val, enabled: true });
+                }}
+                className="w-8 pl-1 pr-3.5 py-0.5 text-center text-xs font-mono bg-transparent text-[#76383d] font-semibold outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                title="照片间距大小 (单位：毫米 mm，点击右侧上下箭头每点一下增加/减少 1mm)"
+              />
+              <div className="absolute right-0 inset-y-0 w-3.5 flex flex-col border-l border-[#ebdbe0] divide-y divide-[#ebdbe0] bg-neutral-50/80">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextVal = Math.min(50, Math.round((spacingConfig.gapMm || 0) + 1));
+                    onUpdateSpacingConfig?.({ gapMm: nextVal, enabled: true });
+                  }}
+                  className="flex-1 flex items-center justify-center text-neutral-500 hover:text-[#76383d] hover:bg-neutral-100 cursor-pointer"
+                  title="增加 1mm"
+                >
+                  <ChevronUp className="w-2.5 h-2.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextVal = Math.max(0, Math.round((spacingConfig.gapMm || 0) - 1));
+                    onUpdateSpacingConfig?.({ gapMm: nextVal, enabled: true });
+                  }}
+                  className="flex-1 flex items-center justify-center text-neutral-500 hover:text-[#76383d] hover:bg-neutral-100 cursor-pointer"
+                  title="减少 1mm"
+                >
+                  <ChevronDown className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            </div>
             <span className="text-[11px] font-sans text-neutral-500">
               mm
             </span>
           </div>
-
-          {/* 常用预设快捷按钮 (0, 2, 3, 5mm) */}
-          {spacingConfig.enabled && (
-            <div className="flex items-center space-x-0.5 pl-0.5">
-              {[0, 2, 3, 5].map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => onUpdateSpacingConfig?.({ gapMm: preset })}
-                  className={`px-1 py-0.5 text-[10px] rounded leading-none transition-colors cursor-pointer ${
-                    spacingConfig.gapMm === preset
-                      ? 'bg-[#76383d] text-white font-medium'
-                      : 'hover:bg-white text-neutral-600'
-                  }`}
-                  title={`快速设置为 ${preset}mm 间距`}
-                >
-                  {preset}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
-      {/* 右侧动作区：PSD下载 + 预览 + 保存 + 加入购物车 + 缩放控制 */}
+      {/* 右侧动作区：预览 + 保存 + 加入购物车 + 缩放控制 */}
       <div className="flex items-center space-x-2 shrink-0">
-        {/* 下载PSD模板 */}
-        <button
-          id="btn-download-psd-template"
-          onClick={handleDownloadPsd}
-          className="hidden md:flex items-center space-x-1 px-2.5 py-1 text-xs text-[#3c4043] hover:text-[#76383d] hover:bg-[#faf4f5] border border-[#dadce0] hover:border-[#d8b9be] rounded transition-colors cursor-pointer"
-          title="下载标准印刷 PSD/JSON 分辨率规范"
-        >
-          <FileCode className="w-3.5 h-3.5 text-neutral-500" />
-          <span>下载PSD模板</span>
-        </button>
+        {/* 多页编辑与总览 (图邦主模式) */}
+        {onOpenMultiPage && (
+          <button
+            id="btn-header-multi-page-view"
+            onClick={onOpenMultiPage}
+            className="flex items-center space-x-1.5 px-2.5 py-1 text-xs text-white bg-[#76383d] hover:bg-[#632c30] rounded transition-all cursor-pointer font-medium shadow-2xs"
+            title="打开全书多页编辑与总览 (图邦主平铺模式)"
+          >
+            <IconMultiPageGrid className="w-3.5 h-3.5" />
+            <span>多页编辑</span>
+          </button>
+        )}
+
+        {/* 导出 300DPI 印刷图 (印前质检测试) */}
+        {onOpenPrintExport && (
+          <button
+            id="btn-export-print-300dpi"
+            onClick={onOpenPrintExport}
+            className="flex items-center space-x-1 px-2.5 py-1 text-xs text-[#76383d] bg-[#faf4f5] hover:bg-[#f3e6e8] border border-[#d8b9be] rounded transition-colors cursor-pointer font-medium"
+            title="导出当前页面 300 DPI 印刷级高清 JPG 进行印前质检检测"
+          >
+            <Printer className="w-3.5 h-3.5 text-[#76383d]" />
+            <span>导出印刷图 (300DPI)</span>
+          </button>
+        )}
 
         {/* 预览 */}
         <button
@@ -609,71 +679,6 @@ export const Header: React.FC<HeaderProps> = ({
             </>
           )}
         </button>
-
-        {/* 加入购物车 (酒红主按钮，与参考图完全一致) */}
-        <button
-          id="btn-add-to-cart"
-          onClick={handleAddToCart}
-          className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-[#76383d] hover:bg-[#632c30] active:bg-[#522125] text-white rounded text-xs font-semibold shadow-xs transition-all cursor-pointer"
-        >
-          <ShoppingCart className="w-3.5 h-3.5 text-white" />
-          <span>{cartSuccess ? '已加入购物车！' : '加入购物车'}</span>
-        </button>
-
-        <div className="w-[1px] h-4 bg-[#dadce0] mx-1" />
-
-        {/* 视图控制：网格、缩放滑块 */}
-        <div className="flex items-center space-x-1.5 text-neutral-500">
-          <button
-            onClick={() => onUpdateViewConfig({ showGrid: !viewConfig.showGrid })}
-            className={`p-1 rounded hover:bg-neutral-100 transition-colors cursor-pointer ${
-              viewConfig.showGrid ? 'text-[#76383d] bg-[#faf4f5] border border-[#d8b9be]' : 'text-neutral-500'
-            }`}
-            title={viewConfig.showGrid ? '隐藏网格' : '显示参考网格'}
-          >
-            <Grid className="w-3.5 h-3.5" />
-          </button>
-
-          {/* 缩放控制滑块 */}
-          <div className="flex items-center space-x-1">
-            <input
-              type="range"
-              min="50"
-              max="150"
-              step="5"
-              value={viewConfig.zoomPercent}
-              onChange={(e) => onUpdateViewConfig({ zoomPercent: Number(e.target.value) })}
-              className="w-16 h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-[#76383d]"
-              title={`缩放比例: ${viewConfig.zoomPercent}%`}
-            />
-            <span className="text-[10px] font-mono text-neutral-400 w-7 text-right">
-              {viewConfig.zoomPercent}%
-            </span>
-          </div>
-
-          {/* 自动适应屏幕尺寸按钮 */}
-          {onAutoFit && (
-            <button
-              onClick={onAutoFit}
-              className="p-1 rounded hover:bg-neutral-100 text-neutral-500 hover:text-[#76383d] transition-colors cursor-pointer flex items-center"
-              title="自动适应当前屏幕大小 (自适应比例)"
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-            </button>
-          )}
-
-          <button
-            onClick={() => onUpdateViewConfig({ zoomPercent: 100 })}
-            className={`px-1 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer ${
-              viewConfig.zoomPercent === 100
-                ? 'bg-neutral-200 text-neutral-800 font-semibold'
-                : 'text-neutral-500 hover:bg-neutral-100 hover:text-[#76383d]'
-            }`}
-            title="还原为原始 100% 比例"
-          >
-            1:1
-          </button>
-        </div>
       </div>
     </header>
   );

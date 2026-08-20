@@ -12,6 +12,7 @@ import {
   FileCode,
 } from 'lucide-react';
 import { SpreadModel, UploadedPhoto } from '../types/editor';
+import { IconMultiPageGrid } from './MultiPageEditorModal';
 
 interface PageBarProps {
   spreads: SpreadModel[];
@@ -22,6 +23,7 @@ interface PageBarProps {
   onAutoLayout: () => void;
   onClearAll: () => void;
   onSwapSpreadPagePhotos?: (spreadIndex?: number) => void;
+  onOpenMultiPage?: () => void;
   photos: UploadedPhoto[];
 }
 
@@ -34,6 +36,7 @@ export const PageBar: React.FC<PageBarProps> = ({
   onAutoLayout,
   onClearAll,
   onSwapSpreadPagePhotos,
+  onOpenMultiPage,
   photos,
 }) => {
   const photoMap = new Map<string, UploadedPhoto>(photos.map((p) => [p.id, p]));
@@ -75,8 +78,21 @@ export const PageBar: React.FC<PageBarProps> = ({
             <span>快速编辑</span>
           </button>
 
+          {/* 多页平铺编辑 (图邦主模式) */}
+          {onOpenMultiPage && (
+            <button
+              onClick={onOpenMultiPage}
+              className="px-2.5 py-1 bg-[#76383d] hover:bg-[#632c30] active:bg-[#522125] text-white rounded text-[11px] font-semibold flex items-center space-x-1 shadow-2xs transition-all cursor-pointer"
+              title="打开全书多页平铺编辑与总览 (图邦主模式)"
+            >
+              <IconMultiPageGrid className="w-3.5 h-3.5" />
+              <span>多页编辑</span>
+            </button>
+          )}
+
           <button
             className="px-2 py-1 bg-[#f8f9fa] hover:bg-[#f1f3f4] border border-[#dadce0] text-neutral-700 rounded text-[11px] flex items-center space-x-1 transition-colors cursor-pointer"
+            onClick={onOpenMultiPage}
           >
             <ArrowLeftRight className="w-3 h-3 text-neutral-500" />
             <span>调整顺序</span>

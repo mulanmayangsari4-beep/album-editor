@@ -1,20 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { SpreadModel, UploadedPhoto, EditorViewConfig, PhotoCrop, BookSpec, SpacingConfig, FixedGapConfig } from '../types/editor';
 import { PhotoFrame } from './PhotoFrame';
 import { MultiSelectBoundingBox } from './MultiSelectBoundingBox';
 import { calculateMoveSnap, GuideLine, SpacingGap } from '../utils/snapEngine';
+import { IconMultiPageGrid } from './MultiPageEditorModal';
 import {
   Trash2,
   LayoutGrid,
   ArrowLeftRight,
   Layers,
   Copy,
+  ArrowLeft,
+  ArrowRight,
+  ZoomIn,
+  ZoomOut,
+  Hand,
 } from 'lucide-react';
 
 interface SpreadCanvasProps {
   spread: SpreadModel;
+  spreads?: SpreadModel[];
+  currentSpreadIndex?: number;
+  onSelectSpread?: (index: number) => void;
+  onOpenMultiPage?: () => void;
   bookSpec: BookSpec;
   viewConfig: EditorViewConfig;
+  onUpdateViewConfig?: (cfg: Partial<EditorViewConfig>) => void;
   spacingConfig?: SpacingConfig;
   photos: UploadedPhoto[];
   selectedSlotId: string | null;
@@ -26,6 +37,13 @@ interface SpreadCanvasProps {
   onDropPhotoToSlot: (pageId: string, slotId: string, photoId: string) => void;
   onUpdateSlotCrop: (pageId: string, slotId: string, crop: PhotoCrop) => void;
   onClearSlotPhoto: (pageId: string, slotId: string) => void;
+  onUpdateSlotProps?: (pageId: string, slotId: string, props: any) => void;
+  onBringForward?: (pageId: string, slotId: string) => void;
+  onSendBackward?: (pageId: string, slotId: string) => void;
+  onBringToFront?: (pageId: string, slotId: string) => void;
+  onSendToBack?: (pageId: string, slotId: string) => void;
+  onMakeFullScreen?: (pageId: string, slotId: string) => void;
+  onLocatePhoto?: (photoId: string) => void;
   onUpdateSlotText?: (pageId: string, slotId: string, text: string) => void;
   onUpdateSlotBounds?: (
     pageId: string,
@@ -40,6 +58,7 @@ interface SpreadCanvasProps {
   onDeleteSlot?: (pageId: string, slotId: string) => void;
   onDeleteMultipleSlots?: (pageId: string, slotIds: string[]) => void;
   onDuplicateSlot?: (pageId: string, slotId: string) => void;
+  onOpenSwapPhotoModal?: (slotId: string) => void;
   onSwapPhotos?: (slotIdA: string, slotIdB: string) => void;
   onSwapSpreadPagePhotos?: () => void;
   onOpenLayoutDrawer: (page: 'left' | 'right') => void;
@@ -48,8 +67,13 @@ interface SpreadCanvasProps {
 
 export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
   spread,
+  spreads = [],
+  currentSpreadIndex = 0,
+  onSelectSpread,
+  onOpenMultiPage,
   bookSpec,
   viewConfig,
+  onUpdateViewConfig,
   spacingConfig,
   photos,
   selectedSlotId,
@@ -61,6 +85,13 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
   onDropPhotoToSlot,
   onUpdateSlotCrop,
   onClearSlotPhoto,
+  onUpdateSlotProps,
+  onBringForward,
+  onSendBackward,
+  onBringToFront,
+  onSendToBack,
+  onMakeFullScreen,
+  onLocatePhoto,
   onUpdateSlotText,
   onUpdateSlotBounds,
   onUpdateMultipleSlotsBounds,
@@ -68,16 +99,57 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
   onDeleteSlot,
   onDeleteMultipleSlots,
   onDuplicateSlot,
+  onOpenSwapPhotoModal,
   onSwapPhotos,
   onSwapSpreadPagePhotos,
   onOpenLayoutDrawer,
   onClearPagePhotos,
 }) => {
   const photoMap = new Map<string, UploadedPhoto>(photos.map((p) => [p.id, p]));
-  // 缩放比例
-  const zoomScale = (viewConfig.zoomPercent || 100) / 100;
-  // 关键：发丝级极致 0.5px 细线补偿，彻底消除纯黑带来的膨胀感，全分辨率下呈现米莫级精细感
-  const hairlineThickness = Math.max(0.5, 0.75 / zoomScale);
+  
+  // 工作区容器引用与自适应最佳满屏比例计算
+  const containerRef = useRef<HTMLElement>(null);
+  const [fitScale, setFitScale] = useState<number>(1);
+
+  useEffect(() => {
+    const updateFitScale = () => {
+      if (!containerRef.current) return;
+      const { clientWidth, clientHeight } = containerRef.current;
+      if (clientWidth <= 0 || clientHeight <= 0) return;
+
+      // 留出适度安全边距 (左右 56px，上下留出底部浮动控制栏约 96px 边距)
+      const availableWidth = Math.max(200, clientWidth - 56);
+      const availableHeight = Math.max(150, clientHeight - 96);
+      const bookWidth = 920;
+      const bookHeight = 460;
+
+      const scaleX = availableWidth / bookWidth;
+      const scaleY = availableHeight / bookHeight;
+      const computedFit = Math.min(scaleX, scaleY);
+      if (computedFit > 0) {
+        setFitScale(computedFit);
+      }
+    };
+
+    updateFitScale();
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(updateFitScale);
+    observer.observe(el);
+    window.addEventListener('resize', updateFitScale);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateFitScale);
+    };
+  }, []);
+
+  // 缩放比例：最左侧 100% 严格对应最佳适屏满屏比例 (fitScale)，向右拖动则在此基础上平滑放大
+  const zoomMultiplier = (viewConfig.zoomPercent || 100) / 100;
+  const finalScale = fitScale * zoomMultiplier;
+  // 发丝级极致细线补偿
+  const hairlineThickness = Math.max(0.5, 0.75 / finalScale);
 
   const leftSelectedSlots = spread.leftPage.slots.filter((s) => selectedSlotIds.includes(s.id));
   const rightSelectedSlots = spread.rightPage.slots.filter((s) => selectedSlotIds.includes(s.id));
@@ -88,6 +160,50 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
   const [rightGuides, setRightGuides] = useState<GuideLine[]>([]);
   const [rightGaps, setRightGaps] = useState<SpacingGap[]>([]);
 
+  // 抓手移动画板状态 (小手工具 & 空格快捷键)
+  const [isHandToolActive, setIsHandToolActive] = useState<boolean>(false);
+  const [isSpacePressed, setIsSpacePressed] = useState<boolean>(false);
+  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState<boolean>(false);
+
+  // 监听空格键按住临时激活抓手移动
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.code === 'Space' &&
+        !isSpacePressed &&
+        !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)
+      ) {
+        setIsSpacePressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isSpacePressed]);
+
+  // 计算当前跨页的页码显示文本 (如 12 — 13 或 封面)
+  const pageLabel = useMemo(() => {
+    const leftNum = spread.leftPage.pageNumber;
+    const rightNum = spread.rightPage.pageNumber;
+    if (leftNum === 0 && rightNum === 0) return '封面';
+    if (!leftNum && !rightNum) return '封面';
+    if (leftNum && !rightNum) return `P${leftNum}`;
+    if (!leftNum && rightNum) return `P${rightNum}`;
+    return `${leftNum} — ${rightNum}`;
+  }, [spread]);
+
+  const canPrevSpread = currentSpreadIndex > 0;
+  const canNextSpread = spreads.length > 0 ? currentSpreadIndex < spreads.length - 1 : false;
+
   // Adobe Illustrator 风格相交框选（Crossing/Intersect Marquee Selection）状态
   const [marqueeBox, setMarqueeBox] = useState<{
     startX: number;
@@ -95,6 +211,95 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
     currentX: number;
     currentY: number;
   } | null>(null);
+
+  // 照片互换拖拽悬停状态 (按住左上角蓝色图标拖拽对调)
+  const [swapDragState, setSwapDragState] = useState<{
+    sourceSlotId: string;
+    sourcePageId: string;
+    photo?: UploadedPhoto;
+    mouseX: number;
+    mouseY: number;
+    hoverSlotId: string | null;
+  } | null>(null);
+
+  // 启动按住图标拖拽对调照片 (手势大于3px触发对调，单击触发选图弹窗)
+  const handleStartPhotoSwapDrag = (
+    e: React.MouseEvent,
+    pageId: string,
+    slotId: string,
+    photo?: UploadedPhoto
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let isDragging = false;
+
+    const handleMouseMove = (moveEvt: MouseEvent) => {
+      const dist = Math.hypot(moveEvt.clientX - startX, moveEvt.clientY - startY);
+      if (!isDragging && dist > 3) {
+        isDragging = true;
+      }
+
+      if (isDragging) {
+        // 动态探测鼠标指针下方的相框元素
+        const elementsUnder = document.elementsFromPoint(moveEvt.clientX, moveEvt.clientY);
+        let foundSlotId: string | null = null;
+        for (const el of elementsUnder) {
+          const slotEl = el.closest('[id^="slot-frame-"]');
+          if (slotEl) {
+            const id = slotEl.id.replace('slot-frame-', '');
+            if (id && id !== slotId) {
+              foundSlotId = id;
+              break;
+            }
+          }
+        }
+
+        setSwapDragState({
+          sourceSlotId: slotId,
+          sourcePageId: pageId,
+          photo,
+          mouseX: moveEvt.clientX,
+          mouseY: moveEvt.clientY,
+          hoverSlotId: foundSlotId,
+        });
+      }
+    };
+
+    const handleMouseUp = (upEvt: MouseEvent) => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+
+      if (isDragging) {
+        // 寻找最终落点的目标画框
+        const elementsUnder = document.elementsFromPoint(upEvt.clientX, upEvt.clientY);
+        let targetSlotId: string | null = null;
+        for (const el of elementsUnder) {
+          const slotEl = el.closest('[id^="slot-frame-"]');
+          if (slotEl) {
+            const id = slotEl.id.replace('slot-frame-', '');
+            if (id && id !== slotId) {
+              targetSlotId = id;
+              break;
+            }
+          }
+        }
+
+        if (targetSlotId && onSwapPhotos) {
+          onSwapPhotos(slotId, targetSlotId);
+        }
+        setSwapDragState(null);
+      } else {
+        // 纯点击没有拖拽位移：静默退出，不弹任何对话框
+        setSwapDragState(null);
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
 
   // 多选批量拖拽处理 (支持多选整体在单页内智能磁吸中轴线与吸附辅助线 - 方案 B)
   const handleStartMultiDrag = (
@@ -220,10 +425,39 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // --- Adobe Illustrator 风格相交框选 (碰触一点照片即可选中，自动过滤素材与文字) ---
+  // --- Adobe Illustrator 风格相交框选 / 抓手移动画板 ---
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     // 仅响应鼠标左键
     if (e.button !== 0) return;
+
+    // 若开启了抓手工具或按住了空格键，启动画布平移拖拽 (Pan Tool)
+    if (isHandToolActive || isSpacePressed) {
+      e.preventDefault();
+      setIsPanning(true);
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const initPanX = panOffset.x;
+      const initPanY = panOffset.y;
+
+      const handlePanMove = (moveEvt: MouseEvent) => {
+        const dx = moveEvt.clientX - startX;
+        const dy = moveEvt.clientY - startY;
+        setPanOffset({
+          x: initPanX + dx,
+          y: initPanY + dy,
+        });
+      };
+
+      const handlePanUp = () => {
+        setIsPanning(false);
+        window.removeEventListener('mousemove', handlePanMove);
+        window.removeEventListener('mouseup', handlePanUp);
+      };
+
+      window.addEventListener('mousemove', handlePanMove);
+      window.addEventListener('mouseup', handlePanUp);
+      return;
+    }
 
     const target = e.target as HTMLElement;
     // 如果点击在按钮、输入框、调整尺寸的手柄或画框本体上，不启动画布框选
@@ -233,7 +467,8 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
       target.closest('[title="拖拽改变尺寸"]') ||
       target.closest('[title="上下拉伸"]') ||
       target.closest('[title="左右拉伸"]') ||
-      target.closest('[id^="slot-frame-"]')
+      target.closest('[id^="slot-frame-"]') ||
+      target.closest('#canvas-bottom-floating-controlbar')
     ) {
       return;
     }
@@ -326,15 +561,23 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
   return (
     <main
       id="main-spread-workarea"
+      ref={containerRef}
       onMouseDown={handleCanvasMouseDown}
       onClick={(e) => {
-        // 点击画板外部背景时取消单页/画框选中
+        // 点击画板外部背景时取消单页/画框选中 (抓手状态下不取消)
+        if (isHandToolActive || isSpacePressed) return;
         if (e.target === e.currentTarget) {
           onSelectSlot(null);
           onSelectSide(null);
         }
       }}
-      className="flex-1 bg-[#ededf0] overflow-auto flex items-center justify-center p-4 md:p-8 select-none relative cursor-default"
+      className={`flex-1 bg-[#ededf0] overflow-auto flex items-center justify-center p-4 md:p-8 select-none relative ${
+        isPanning
+          ? 'cursor-grabbing'
+          : isHandToolActive || isSpacePressed
+          ? 'cursor-grab'
+          : 'cursor-default'
+      }`}
       style={{
         backgroundImage: viewConfig.showGrid
           ? 'radial-gradient(#d3d5d9 1px, transparent 1px)'
@@ -342,20 +585,20 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
         backgroundSize: '20px 20px',
       }}
     >
-      {/* 缩放画板包装层 */}
+      {/* 缩放画板包装层 (支持小手工具自由平移和居中自适应缩放) */}
       <div
         id="spread-scale-container"
         style={{
-          transform: `scale(${zoomScale})`,
+          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${finalScale})`,
           transformOrigin: 'center center',
-          transition: 'transform 0.15s ease-out',
+          transition: isPanning ? 'none' : 'transform 0.15s ease-out',
         }}
-        className="flex items-center justify-center relative py-12"
+        className="flex items-center justify-center relative py-8 px-6 isolate shrink-0"
       >
-        {/* 双页展开书本体 */}
+        {/* 双页展开书本体 (标准双页比例，自适应视口完整展示) */}
         <div
           id="double-page-spread-book"
-          className="flex shadow-[0_4px_24px_rgba(0,0,0,0.08)] bg-white relative rounded-xs border border-[#dadce0]"
+          className="flex shadow-[0_4px_24px_rgba(0,0,0,0.08)] bg-white relative rounded-xs border border-[#dadce0] shrink-0"
           style={{
             width: '920px',
             height: '460px',
@@ -364,6 +607,9 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
           {/* ========== 左页 ========== */}
           <div
             id={`page-left-${spread.leftPage.id}`}
+            onMouseDown={() => {
+              onSelectSide('left');
+            }}
             onClick={(e) => {
               if (e.ctrlKey || e.metaKey || e.shiftKey) return;
               e.stopPropagation();
@@ -377,20 +623,42 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
               activeSide === 'left' ? 'z-10' : ''
             }`}
           >
-            {/* 3mm 印刷裁切线 (1:1 辅线同款细密针脚发丝级虚线，内缩约 7px / 3mm) */}
+            {/* 3mm 印刷裁切安全线 (四周虚线，中间中缝不加虚线：左页仅上、下、左三边带细虚线，置顶 z-[65] 确保满版图也清晰可见) */}
             {viewConfig.showBleed && (
-              <div className="absolute inset-[7px] pointer-events-none z-20 overflow-hidden">
+              <div className="absolute inset-0 pointer-events-none z-[65] overflow-hidden">
                 <svg className="w-full h-full" style={{ display: 'block' }}>
-                  <rect
-                    x="0.5"
-                    y="0.5"
-                    width="calc(100% - 1px)"
-                    height="calc(100% - 1px)"
-                    fill="none"
-                    stroke="#e2827e"
+                  {/* 左页顶部虚线 (从左 7px 到右侧中缝) */}
+                  <line
+                    x1="7"
+                    y1="7"
+                    x2="100%"
+                    y2="7"
+                    stroke="#d89ba0"
                     strokeWidth={hairlineThickness}
-                    strokeDasharray="2 2"
-                    opacity="0.9"
+                    strokeDasharray="2.5 2.5"
+                    opacity="0.85"
+                  />
+                  {/* 左页左侧外边缘虚线 */}
+                  <line
+                    x1="7"
+                    y1="7"
+                    x2="7"
+                    y2="calc(100% - 7px)"
+                    stroke="#d89ba0"
+                    strokeWidth={hairlineThickness}
+                    strokeDasharray="2.5 2.5"
+                    opacity="0.85"
+                  />
+                  {/* 左页底部虚线 (从左 7px 到右侧中缝) */}
+                  <line
+                    x1="7"
+                    y1="calc(100% - 7px)"
+                    x2="100%"
+                    y2="calc(100% - 7px)"
+                    stroke="#d89ba0"
+                    strokeWidth={hairlineThickness}
+                    strokeDasharray="2.5 2.5"
+                    opacity="0.85"
                   />
                 </svg>
               </div>
@@ -398,7 +666,7 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
 
             {/* 安全裁切区虚线 */}
             {viewConfig.showSafeZone && (
-              <div className="absolute inset-4 border border-dashed border-emerald-400/30 pointer-events-none z-20" />
+              <div className="absolute inset-4 border border-dashed border-emerald-400/30 pointer-events-none z-[65]" />
             )}
 
             {/* 左页槽位列表 */}
@@ -407,7 +675,7 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
                 <PhotoFrame
                   key={slot.id}
                   slot={slot}
-                  zIndex={index + 1}
+                  zIndex={slot.zIndex !== undefined ? slot.zIndex : index + 1}
                   hairlineThickness={hairlineThickness}
                   pageId={spread.leftPage.id}
                   photo={slot.photoId ? photoMap.get(slot.photoId) : undefined}
@@ -432,6 +700,15 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
                     onUpdateSlotCrop(spread.leftPage.id, slot.id, crop)
                   }
                   onClearPhoto={() => onClearSlotPhoto(spread.leftPage.id, slot.id)}
+                  onUpdateSlotProps={(props) =>
+                    onUpdateSlotProps?.(spread.leftPage.id, slot.id, props)
+                  }
+                  onBringForward={() => onBringForward?.(spread.leftPage.id, slot.id)}
+                  onSendBackward={() => onSendBackward?.(spread.leftPage.id, slot.id)}
+                  onBringToFront={() => onBringToFront?.(spread.leftPage.id, slot.id)}
+                  onSendToBack={() => onSendToBack?.(spread.leftPage.id, slot.id)}
+                  onMakeFullScreen={() => onMakeFullScreen?.(spread.leftPage.id, slot.id)}
+                  onLocatePhoto={onLocatePhoto}
                   onUpdateText={(text) =>
                     onUpdateSlotText?.(spread.leftPage.id, slot.id, text)
                   }
@@ -441,6 +718,15 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
                   onCommitBounds={onCommitSlotBounds}
                   onDeleteSlot={() => onDeleteSlot?.(spread.leftPage.id, slot.id)}
                   onDuplicateSlot={() => onDuplicateSlot?.(spread.leftPage.id, slot.id)}
+                  onStartSwapDrag={(e) =>
+                    handleStartPhotoSwapDrag(
+                      e,
+                      spread.leftPage.id,
+                      slot.id,
+                      slot.photoId ? photoMap.get(slot.photoId) : undefined
+                    )
+                  }
+                  isSwapTargetHovered={swapDragState?.hoverSlotId === slot.id}
                   onUpdateGuides={(guides, gaps) => {
                     setLeftGuides(guides);
                     setLeftGaps(gaps || []);
@@ -473,9 +759,9 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
               )}
             </div>
 
-            {/* ========== 1:1 还原米莫印品：选中左页时的优雅外框 (无旋转手柄、无8锚点，干净高级) ========== */}
-            {activeSide === 'left' && !selectedSlotId && (
-              <div className="absolute inset-0 pointer-events-none z-30 border-2 border-[#76383d]/50 shadow-[0_0_0_1px_rgba(118,56,61,0.2)]" />
+            {/* ========== 1:1 还原：在左半面操作/选中左页时的柔淡豆沙酒红高亮外框 (外嵌在版面外侧，上、左、下三边包围，中缝无垂直分割线，2px 精致线条，z-[70] 置顶) ========== */}
+            {activeSide === 'left' && (
+              <div className="absolute -top-[2px] -bottom-[2px] -left-[2px] right-0 pointer-events-none z-[70] border-t-2 border-b-2 border-l-2 border-r-0 border-[#c48489] shadow-[-1px_0_0_0_rgba(118,56,61,0.2)]" />
             )}
 
             {/* 左页左下角「切换版式」按钮 */}
@@ -489,7 +775,7 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
                   onOpenLayoutDrawer('left');
                 }}
                 className={`px-2.5 py-1 text-[11px] rounded border shadow-2xs transition-all cursor-pointer flex items-center space-x-1 ${
-                  activeSide === 'left' && !selectedSlotId
+                  activeSide === 'left'
                     ? 'bg-[#76383d] text-white border-[#76383d] font-medium'
                     : 'bg-white hover:bg-neutral-50 text-neutral-700 border-[#dadce0]'
                 }`}
@@ -505,6 +791,9 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
           {/* ========== 右页 ========== */}
           <div
             id={`page-right-${spread.rightPage.id}`}
+            onMouseDown={() => {
+              onSelectSide('right');
+            }}
             onClick={(e) => {
               if (e.ctrlKey || e.metaKey || e.shiftKey) return;
               e.stopPropagation();
@@ -518,20 +807,42 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
               activeSide === 'right' ? 'z-10' : ''
             }`}
           >
-            {/* 3mm 印刷裁切线 (1:1 辅线同款细密针脚发丝级虚线，内缩约 7px / 3mm) */}
+            {/* 3mm 印刷裁切安全线 (四周虚线，中间中缝不加虚线：右页仅上、下、右三边带细虚线，置顶 z-[65] 确保满版图也清晰可见) */}
             {viewConfig.showBleed && (
-              <div className="absolute inset-[7px] pointer-events-none z-20 overflow-hidden">
+              <div className="absolute inset-0 pointer-events-none z-[65] overflow-hidden">
                 <svg className="w-full h-full" style={{ display: 'block' }}>
-                  <rect
-                    x="0.5"
-                    y="0.5"
-                    width="calc(100% - 1px)"
-                    height="calc(100% - 1px)"
-                    fill="none"
-                    stroke="#e2827e"
+                  {/* 右页顶部虚线 (从中缝到右侧 7px 处) */}
+                  <line
+                    x1="0"
+                    y1="7"
+                    x2="calc(100% - 7px)"
+                    y2="7"
+                    stroke="#d89ba0"
                     strokeWidth={hairlineThickness}
-                    strokeDasharray="2 2"
-                    opacity="0.9"
+                    strokeDasharray="2.5 2.5"
+                    opacity="0.85"
+                  />
+                  {/* 右页右侧外边缘虚线 */}
+                  <line
+                    x1="calc(100% - 7px)"
+                    y1="7"
+                    x2="calc(100% - 7px)"
+                    y2="calc(100% - 7px)"
+                    stroke="#d89ba0"
+                    strokeWidth={hairlineThickness}
+                    strokeDasharray="2.5 2.5"
+                    opacity="0.85"
+                  />
+                  {/* 右页底部虚线 (从中缝到右侧 7px 处) */}
+                  <line
+                    x1="0"
+                    y1="calc(100% - 7px)"
+                    x2="calc(100% - 7px)"
+                    y2="calc(100% - 7px)"
+                    stroke="#d89ba0"
+                    strokeWidth={hairlineThickness}
+                    strokeDasharray="2.5 2.5"
+                    opacity="0.85"
                   />
                 </svg>
               </div>
@@ -539,7 +850,7 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
 
             {/* 安全裁切区虚线 */}
             {viewConfig.showSafeZone && (
-              <div className="absolute inset-4 border border-dashed border-emerald-400/30 pointer-events-none z-20" />
+              <div className="absolute inset-4 border border-dashed border-emerald-400/30 pointer-events-none z-[65]" />
             )}
 
             {/* 右页槽位列表 */}
@@ -548,7 +859,7 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
                 <PhotoFrame
                   key={slot.id}
                   slot={slot}
-                  zIndex={index + 1}
+                  zIndex={slot.zIndex !== undefined ? slot.zIndex : index + 1}
                   hairlineThickness={hairlineThickness}
                   pageId={spread.rightPage.id}
                   photo={slot.photoId ? photoMap.get(slot.photoId) : undefined}
@@ -573,6 +884,15 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
                     onUpdateSlotCrop(spread.rightPage.id, slot.id, crop)
                   }
                   onClearPhoto={() => onClearSlotPhoto(spread.rightPage.id, slot.id)}
+                  onUpdateSlotProps={(props) =>
+                    onUpdateSlotProps?.(spread.rightPage.id, slot.id, props)
+                  }
+                  onBringForward={() => onBringForward?.(spread.rightPage.id, slot.id)}
+                  onSendBackward={() => onSendBackward?.(spread.rightPage.id, slot.id)}
+                  onBringToFront={() => onBringToFront?.(spread.rightPage.id, slot.id)}
+                  onSendToBack={() => onSendToBack?.(spread.rightPage.id, slot.id)}
+                  onMakeFullScreen={() => onMakeFullScreen?.(spread.rightPage.id, slot.id)}
+                  onLocatePhoto={onLocatePhoto}
                   onUpdateText={(text) =>
                     onUpdateSlotText?.(spread.rightPage.id, slot.id, text)
                   }
@@ -582,6 +902,15 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
                   onCommitBounds={onCommitSlotBounds}
                   onDeleteSlot={() => onDeleteSlot?.(spread.rightPage.id, slot.id)}
                   onDuplicateSlot={() => onDuplicateSlot?.(spread.rightPage.id, slot.id)}
+                  onStartSwapDrag={(e) =>
+                    handleStartPhotoSwapDrag(
+                      e,
+                      spread.rightPage.id,
+                      slot.id,
+                      slot.photoId ? photoMap.get(slot.photoId) : undefined
+                    )
+                  }
+                  isSwapTargetHovered={swapDragState?.hoverSlotId === slot.id}
                   onUpdateGuides={(guides, gaps) => {
                     setRightGuides(guides);
                     setRightGaps(gaps || []);
@@ -614,9 +943,9 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
               )}
             </div>
 
-            {/* ========== 1:1 还原米莫印品：选中右页时的优雅外框 (无旋转手柄、无8锚点，干净高级) ========== */}
-            {activeSide === 'right' && !selectedSlotId && (
-              <div className="absolute inset-0 pointer-events-none z-30 border-2 border-[#76383d]/50 shadow-[0_0_0_1px_rgba(118,56,61,0.2)]" />
+            {/* ========== 1:1 还原：在右半面操作/选中右页时的柔淡豆沙酒红高亮外框 (外嵌在版面外侧，上、右、下三边包围，中缝无垂直分割线，2px 精致线条，z-[70] 置顶) ========== */}
+            {activeSide === 'right' && (
+              <div className="absolute -top-[2px] -bottom-[2px] left-0 -right-[2px] pointer-events-none z-[70] border-t-2 border-b-2 border-r-2 border-l-0 border-[#c48489] shadow-[1px_0_0_0_rgba(118,56,61,0.2)]" />
             )}
 
             {/* 右页右下角「切换版式」按钮 */}
@@ -630,7 +959,7 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
                   onOpenLayoutDrawer('right');
                 }}
                 className={`px-2.5 py-1 text-[11px] rounded border shadow-2xs transition-all cursor-pointer flex items-center space-x-1 ${
-                  activeSide === 'right' && !selectedSlotId
+                  activeSide === 'right'
                     ? 'bg-[#76383d] text-white border-[#76383d] font-medium'
                     : 'bg-white hover:bg-neutral-50 text-neutral-700 border-[#dadce0]'
                 }`}
@@ -728,53 +1057,8 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
               </div>
             ))}
 
-            {/* 左页间隙高亮 */}
-            {leftGaps.map((gap) => (
-              <div
-                key={`spread-gap-l-${gap.id}`}
-                style={{
-                  left: `${gap.x * 0.5}%`,
-                  top: `${gap.y}%`,
-                  width: `${gap.width * 0.5}%`,
-                  height: `${gap.height}%`,
-                  borderLeftWidth: `${hairlineThickness}px`,
-                  borderRightWidth: `${hairlineThickness}px`,
-                  borderTopWidth: `${hairlineThickness}px`,
-                  borderBottomWidth: `${hairlineThickness}px`,
-                }}
-                className="absolute pointer-events-none z-55 bg-[#76383d]/12 border-[#76383d]/30 animate-fade-in flex items-center justify-center overflow-visible"
-              >
-                {gap.label && (
-                  <span className="text-[10px] font-sans font-medium px-2 py-0.5 bg-[#76383d] text-white rounded-full whitespace-nowrap shadow-[0_2px_6px_rgba(0,0,0,0.35)] select-none pointer-events-none z-60 transform scale-95 transition-transform">
-                    {gap.label}
-                  </span>
-                )}
-              </div>
-            ))}
-
-            {/* 右页间隙高亮 */}
-            {rightGaps.map((gap) => (
-              <div
-                key={`spread-gap-r-${gap.id}`}
-                style={{
-                  left: `${50 + gap.x * 0.5}%`,
-                  top: `${gap.y}%`,
-                  width: `${gap.width * 0.5}%`,
-                  height: `${gap.height}%`,
-                  borderLeftWidth: `${hairlineThickness}px`,
-                  borderRightWidth: `${hairlineThickness}px`,
-                  borderTopWidth: `${hairlineThickness}px`,
-                  borderBottomWidth: `${hairlineThickness}px`,
-                }}
-                className="absolute pointer-events-none z-55 bg-[#76383d]/12 border-[#76383d]/30 animate-fade-in flex items-center justify-center overflow-visible"
-              >
-                {gap.label && (
-                  <span className="text-[10px] font-sans font-medium px-2 py-0.5 bg-[#76383d] text-white rounded-full whitespace-nowrap shadow-[0_2px_6px_rgba(0,0,0,0.35)] select-none pointer-events-none z-60 transform scale-95 transition-transform">
-                    {gap.label}
-                  </span>
-                )}
-              </div>
-            ))}
+            {/* 左页间隙高亮 (已根据需求移除 2mm 等气泡标签与色块，保持纯净对齐辅助线) */}
+            {/* 右页间隙高亮 (同上) */}
           </div>
         </div>
 
@@ -812,7 +1096,7 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
           </div>
         )}
 
-        {/* ========== 方案1：多选时出现在下方的精简浮动操作工具栏 (重点：选 2 个画框时专属呈现 ⇄ 互换照片 按钮) ========== */}
+        {/* ========== 多选时出现在下方的精简浮动操作工具栏 ========== */}
         {selectedSlotIds.length >= 2 && (
           <div
             id="multi-selection-floating-toolbar"
@@ -821,26 +1105,6 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
             <span className="text-[11px] font-medium text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
               已选中 {selectedSlotIds.length} 个画框
             </span>
-
-            {/* 核心功能：当恰好选中 2 个画框时，显示醒目的 ⇄ 互换照片 按钮 */}
-            {selectedSlotIds.length === 2 && onSwapPhotos && (
-              <>
-                <div className="w-[1px] h-4 bg-neutral-200" />
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSwapPhotos(selectedSlotIds[0], selectedSlotIds[1]);
-                  }}
-                  className="px-2.5 py-1 bg-[#76383d] hover:bg-[#5f2c30] active:scale-95 text-white rounded font-medium cursor-pointer transition-all flex items-center space-x-1.5 shadow-xs"
-                  title="互换两张照片的位置 (快捷键: X)"
-                >
-                  <ArrowLeftRight className="w-3.5 h-3.5" />
-                  <span>互换照片</span>
-                  <span className="text-[10px] opacity-75 ml-0.5 font-mono">(X)</span>
-                </button>
-              </>
-            )}
 
             <div className="w-[1px] h-4 bg-neutral-200" />
 
@@ -879,6 +1143,169 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
           }}
         />
       )}
+
+      {/* ========== 拖拽互换照片时跟随光标的极简照片缩略预览 (Ghost Preview) ========== */}
+      {swapDragState && swapDragState.photo && (
+        <div
+          id="swap-drag-ghost-preview"
+          className="fixed pointer-events-none z-[9999] -translate-x-1/2 -translate-y-1/2 select-none animate-fade-in"
+          style={{
+            left: `${swapDragState.mouseX}px`,
+            top: `${swapDragState.mouseY}px`,
+          }}
+        >
+          <div className="relative w-12 h-12 rounded-lg overflow-hidden shadow-2xl border-2 border-white ring-2 ring-black/20 bg-neutral-800">
+            <img
+              src={
+                swapDragState.photo.previewUrl ||
+                swapDragState.photo.thumbnailUrl ||
+                swapDragState.photo.thumbUrl ||
+                swapDragState.photo.url
+              }
+              alt=""
+              className="w-full h-full object-cover"
+            />
+            {/* 右下角黑白对调角标 */}
+            <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white text-neutral-800 flex items-center justify-center border border-neutral-200 shadow-sm">
+              <ArrowLeftRight className="w-2.5 h-2.5 stroke-[2.5]" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========== 底部悬浮控制栏：页码显示与切换 + 缩放控制 + 抓手移动工具 (1:1 还原用户参考图比例与大号胶囊) ========== */}
+      <div
+        id="canvas-bottom-floating-controlbar"
+        className="fixed bottom-7 left-1/2 -translate-x-1/2 z-40 flex items-center space-x-2.5 select-none animate-fade-in pointer-events-auto"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* 左侧胶囊：页码切换与显示 [ ← | 4 — 5 | → ] */}
+        <div className="bg-white border border-[#dadce0] rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.08)] h-12 px-2 flex items-center text-neutral-800">
+          <button
+            type="button"
+            id="btn-bottom-prev-page"
+            disabled={!canPrevSpread}
+            onClick={() => onSelectSpread?.(Math.max(0, currentSpreadIndex - 1))}
+            className={`w-9 h-9 flex items-center justify-center rounded-lg hover:bg-neutral-100 transition-colors ${
+              canPrevSpread ? 'text-neutral-700 hover:text-[#76383d] cursor-pointer' : 'text-neutral-300 cursor-not-allowed'
+            }`}
+            title="上一跨页"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+
+          <div className="w-[1px] h-6 bg-[#eaedf0] mx-1" />
+
+          {/* 页码显示 (如 4 — 5 或 封面，清晰大字号) */}
+          <span className="text-base font-medium text-[#202124] px-4 min-w-[80px] text-center tracking-wide font-sans">
+            {pageLabel}
+          </span>
+
+          <div className="w-[1px] h-6 bg-[#eaedf0] mx-1" />
+
+          <button
+            type="button"
+            id="btn-bottom-next-page"
+            disabled={!canNextSpread}
+            onClick={() => onSelectSpread?.(Math.min(spreads.length - 1, currentSpreadIndex + 1))}
+            className={`w-9 h-9 flex items-center justify-center rounded-lg hover:bg-neutral-100 transition-colors ${
+              canNextSpread ? 'text-neutral-700 hover:text-[#76383d] cursor-pointer' : 'text-neutral-300 cursor-not-allowed'
+            }`}
+            title="下一跨页"
+          >
+            <ArrowRight className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* 中间胶囊：缩放控制 [ ⊖ | ●──────── | ⊕ ] */}
+        <div className="bg-white border border-[#dadce0] rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.08)] h-12 px-3 flex items-center space-x-1.5 text-neutral-600">
+          <button
+            type="button"
+            id="btn-bottom-zoom-out"
+            disabled={(viewConfig.zoomPercent || 100) <= 100}
+            onClick={() => onUpdateViewConfig?.({ zoomPercent: Math.max(100, (viewConfig.zoomPercent || 100) - 10) })}
+            className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+              (viewConfig.zoomPercent || 100) <= 100
+                ? 'text-neutral-300 cursor-not-allowed'
+                : 'hover:bg-neutral-100 hover:text-[#76383d] text-neutral-600 cursor-pointer'
+            }`}
+            title="缩小至最佳满屏"
+          >
+            <ZoomOut className="w-5 h-5" />
+          </button>
+
+          <div className="w-[1px] h-6 bg-[#eaedf0] mx-1" />
+
+          {/* 缩放滑块 (100% ~ 180% 范围，默认 100% 处于最左侧，对应最佳满屏) */}
+          <div className="px-2.5 flex items-center">
+            <input
+              type="range"
+              min="100"
+              max="180"
+              step="5"
+              value={viewConfig.zoomPercent || 100}
+              onChange={(e) => onUpdateViewConfig?.({ zoomPercent: Number(e.target.value) })}
+              className="mimo-zoom-slider w-36 cursor-pointer"
+              title={(viewConfig.zoomPercent || 100) <= 100 ? '当前状态：最佳满屏 (适屏)' : `放大比例: ${viewConfig.zoomPercent}%`}
+            />
+          </div>
+
+          <div className="w-[1px] h-6 bg-[#eaedf0] mx-1" />
+
+          <button
+            type="button"
+            id="btn-bottom-zoom-in"
+            disabled={(viewConfig.zoomPercent || 100) >= 180}
+            onClick={() => onUpdateViewConfig?.({ zoomPercent: Math.min(180, (viewConfig.zoomPercent || 100) + 10) })}
+            className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+              (viewConfig.zoomPercent || 100) >= 180
+                ? 'text-neutral-300 cursor-not-allowed'
+                : 'hover:bg-neutral-100 hover:text-[#76383d] text-neutral-600 cursor-pointer'
+            }`}
+            title="放大查看细节"
+          >
+            <ZoomIn className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* 右侧胶囊：小手抓手移动设计区域 [ ✋ ] */}
+        <button
+          type="button"
+          id="btn-bottom-hand-tool"
+          onClick={() => setIsHandToolActive(!isHandToolActive)}
+          className={`h-12 w-12 rounded-xl border shadow-[0_4px_16px_rgba(0,0,0,0.08)] flex items-center justify-center transition-all cursor-pointer ${
+            isHandToolActive
+              ? 'bg-[#faf4f5] text-[#76383d] border-[#d8b9be] ring-2 ring-[#76383d]/40'
+              : 'bg-white text-neutral-600 border-[#dadce0] hover:bg-neutral-50 hover:text-neutral-900'
+          }`}
+          title={
+            isHandToolActive
+              ? '抓手移动模式已开启 (按住鼠标左键可拖拽移动设计区，按空格键也可临时拖拽)'
+              : '抓手工具：点击开启拖拽移动设计区 (快捷键：空格键)'
+          }
+        >
+          <Hand className="w-5 h-5" />
+        </button>
+
+        {/* 极速多页编辑按钮 (1:1 还原用户上传图 1 的酒红微标与图邦主多页总览入口) */}
+        {onOpenMultiPage && (
+          <button
+            type="button"
+            id="btn-bottom-multi-page-view"
+            onClick={onOpenMultiPage}
+            className="h-12 px-3 bg-white hover:bg-neutral-50 active:bg-neutral-100 border border-[#dadce0] rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.08)] flex items-center space-x-2 transition-all cursor-pointer group"
+            title="打开多页编辑与总览视图 (图邦主多页平铺模式)"
+          >
+            <div className="w-8 h-8 rounded-lg bg-[#76383d] text-white flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+              <IconMultiPageGrid className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-xs font-semibold text-neutral-700 group-hover:text-[#76383d] transition-colors pr-1">
+              多页编辑
+            </span>
+          </button>
+        )}
+      </div>
     </main>
   );
 };

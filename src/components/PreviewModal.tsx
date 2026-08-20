@@ -10,6 +10,34 @@ interface PreviewModalProps {
   bookSpec: BookSpec;
 }
 
+const getMaskStyle = (maskShape?: string): React.CSSProperties => {
+  if (!maskShape || maskShape === 'none') return {};
+  switch (maskShape) {
+    case 'circle':
+      return { clipPath: 'circle(50% at 50% 50%)' };
+    case 'heart':
+      return {
+        clipPath:
+          'polygon(50% 15%, 62% 0%, 82% 0%, 100% 18%, 100% 40%, 50% 95%, 0% 40%, 0% 18%, 18% 0%, 38% 0%)',
+      };
+    case 'star':
+      return {
+        clipPath:
+          'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+      };
+    case 'diamond':
+      return { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' };
+    case 'triangle':
+      return { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' };
+    case 'hexagon':
+      return { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' };
+    case 'arch':
+      return { borderRadius: '1000px 1000px 0 0' };
+    default:
+      return {};
+  }
+};
+
 export const PreviewModal: React.FC<PreviewModalProps> = ({
   isOpen,
   onClose,
@@ -102,6 +130,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
 
               const photo = slot.photoId ? photoMap.get(slot.photoId) : undefined;
               const crop = slot.crop || { x: 50, y: 50, scale: 1, rotation: 0 };
+              const hasBorder = !!(slot.borderWidth && slot.borderWidth > 0);
               return (
                 <div
                   key={slot.id}
@@ -110,6 +139,16 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                     top: `${slot.y}%`,
                     width: `${slot.width}%`,
                     height: `${slot.height}%`,
+                    opacity: slot.opacity !== undefined ? slot.opacity : 1,
+                    transform: slot.rotation ? `rotate(${slot.rotation}deg)` : undefined,
+                    borderRadius:
+                      slot.maskShape && slot.maskShape !== 'none'
+                        ? undefined
+                        : slot.borderRadius
+                        ? `${slot.borderRadius}px`
+                        : undefined,
+                    border: hasBorder ? `${slot.borderWidth}px solid ${slot.borderColor || '#ffffff'}` : undefined,
+                    ...getMaskStyle(slot.maskShape),
                   }}
                   className="absolute overflow-hidden bg-[#e2e3e5] flex items-center justify-center"
                 >
@@ -119,10 +158,10 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                       alt=""
                       referrerPolicy="no-referrer"
                       style={{
-                        transform: `scale(${crop.scale}) rotate(${crop.rotation}deg)`,
-                        objectPosition: `${crop.x}% ${crop.y}%`,
+                        transform: `scale(${crop.scale}) rotate(${crop.rotation || 0}deg) ${slot.flipH ? 'scaleX(-1)' : ''}`,
+                        objectPosition: slot.fitMode === 'contain' ? 'center' : `${crop.x}% ${crop.y}%`,
                       }}
-                      className="w-full h-full object-cover"
+                      className={`w-full h-full ${slot.fitMode === 'contain' ? 'object-contain' : 'object-cover'}`}
                     />
                   )}
                 </div>
@@ -163,6 +202,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
 
               const photo = slot.photoId ? photoMap.get(slot.photoId) : undefined;
               const crop = slot.crop || { x: 50, y: 50, scale: 1, rotation: 0 };
+              const hasBorder = !!(slot.borderWidth && slot.borderWidth > 0);
               return (
                 <div
                   key={slot.id}
@@ -171,6 +211,16 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                     top: `${slot.y}%`,
                     width: `${slot.width}%`,
                     height: `${slot.height}%`,
+                    opacity: slot.opacity !== undefined ? slot.opacity : 1,
+                    transform: slot.rotation ? `rotate(${slot.rotation}deg)` : undefined,
+                    borderRadius:
+                      slot.maskShape && slot.maskShape !== 'none'
+                        ? undefined
+                        : slot.borderRadius
+                        ? `${slot.borderRadius}px`
+                        : undefined,
+                    border: hasBorder ? `${slot.borderWidth}px solid ${slot.borderColor || '#ffffff'}` : undefined,
+                    ...getMaskStyle(slot.maskShape),
                   }}
                   className="absolute overflow-hidden bg-[#e2e3e5] flex items-center justify-center"
                 >
@@ -180,10 +230,10 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                       alt=""
                       referrerPolicy="no-referrer"
                       style={{
-                        transform: `scale(${crop.scale}) rotate(${crop.rotation}deg)`,
-                        objectPosition: `${crop.x}% ${crop.y}%`,
+                        transform: `scale(${crop.scale}) rotate(${crop.rotation || 0}deg) ${slot.flipH ? 'scaleX(-1)' : ''}`,
+                        objectPosition: slot.fitMode === 'contain' ? 'center' : `${crop.x}% ${crop.y}%`,
                       }}
-                      className="w-full h-full object-cover"
+                      className={`w-full h-full ${slot.fitMode === 'contain' ? 'object-contain' : 'object-cover'}`}
                     />
                   )}
                 </div>

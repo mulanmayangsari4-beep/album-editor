@@ -984,3 +984,292 @@ export function calculateResizeSnap(
   };
 }
 
+/**
+ * 4 角对角线等比例缩放时的智能边缘吸附与对齐辅助线引擎
+ * 保持严格的宽高比不变，同时智能吸附临近照片的左/右/顶/底边缘、页面边缘以及固定间距
+ */
+export function calculateProportionalResizeSnap(
+  currentId: string,
+  initialBounds: { x: number; y: number; width: number; height: number },
+  candidateBounds: { x: number; y: number; width: number; height: number },
+  handle: 'nw' | 'ne' | 'se' | 'sw',
+  otherSlots: FrameSlot[],
+  containerPixelWidth?: number,
+  containerPixelHeight?: number,
+  fixedGapConfig?: FixedGapConfig
+): SnapResult {
+  const parentW = containerPixelWidth || 800;
+  const parentH = containerPixelHeight || 600;
+  const minSize = 8;
+
+  const thresholdPx = 8; // 屏幕物理像素吸附感应范围
+
+  const others = (otherSlots || []).filter((s) => s.id !== currentId);
+  const guides: GuideLine[] = [];
+  const spacingGaps: SpacingGap[] = [];
+
+  const { x: initX, y: initY, width: initW, height: initH } = initialBounds;
+  const { x: candX, y: candY, width: candW, height: candH } = candidateBounds;
+
+  interface PropSnapCandidate {
+    distPx: number;
+    newX: number;
+    newY: number;
+    newW: number;
+    newH: number;
+    guide: GuideLine;
+    gapIndicator?: SpacingGap;
+  }
+
+  const candidates: PropSnapCandidate[] = [];
+
+  const isRightActive = handle === 'se' || handle === 'ne';
+  const isLeftActive = handle === 'nw' || handle === 'sw';
+  const isBottomActive = handle === 'se' || handle === 'sw';
+  const isTopActive = handle === 'nw' || handle === 'ne';
+
+  const currentActiveX = isRightActive ? candX + candW : candX;
+  const currentActiveY = isBottomActive ? candY + candH : candY;
+
+  // 辅助函数：根据 targetActiveX 计算保持等比缩放的 bounds
+  const solveByTargetX = (targetX: number, guidePosition: number, guideId: string, gapInd?: SpacingGap) => {
+    let targetW = 0;
+    if (isRightActive) {
+      targetW = targetX - initX;
+    } else {
+      targetW = initX + initW - targetX;
+    }
+    if (targetW < minSize) return;
+
+    const scale = targetW / (initW || 1);
+    const targetH = initH * scale;
+    if (targetH < minSize) return;
+
+    let resX = initX;
+    let resY = initY;
+
+    if (handle === 'se') {
+      resX = initX;
+      resY = initY;
+    } else if (handle === 'sw') {
+      resX = initX + initW - targetW;
+      resY = initY;
+    } else if (handle === 'ne') {
+      resX = initX;
+      resY = initY + initH - targetH;
+    } else if (handle === 'nw') {
+      resX = initX + initW - targetW;
+      resY = initY + initH - targetH;
+    }
+
+    const distPx = Math.abs(currentActiveX - targetX) * (parentW / 100);
+    if (distPx <= thresholdPx) {
+      candidates.push({
+        distPx,
+        newX: resX,
+        newY: resY,
+        newW: targetW,
+        newH: targetH,
+        guide: {
+          id: guideId,
+          orientation: 'vertical',
+          position: Number(guidePosition.toFixed(2)),
+          color: 'red',
+        },
+        gapIndicator: gapInd,
+      });
+    }
+  };
+
+  // 辅助函数：根据 targetActiveY 计算保持等比缩放的 bounds
+  const solveByTargetY = (targetY: number, guidePosition: number, guideId: string, gapInd?: SpacingGap) => {
+    let targetH = 0;
+    if (isBottomActive) {
+      targetH = targetY - initY;
+    } else {
+      targetH = initY + initH - targetY;
+    }
+    if (targetH < minSize) return;
+
+    const scale = targetH / (initH || 1);
+    const targetW = initW * scale;
+    if (targetW < minSize) return;
+
+    let resX = initX;
+    let resY = initY;
+
+    if (handle === 'se') {
+      resX = initX;
+      resY = initY;
+    } else if (handle === 'sw') {
+      resX = initX + initW - targetW;
+      resY = initY;
+    } else if (handle === 'ne') {
+      resX = initX;
+      resY = initY + initH - targetH;
+    } else if (handle === 'nw') {
+      resX = initX + initW - targetW;
+      resY = initY + initH - targetH;
+    }
+
+    const distPx = Math.abs(currentActiveY - targetY) * (parentH / 100);
+    if (distPx <= thresholdPx) {
+      candidates.push({
+        distPx,
+        newX: resX,
+        newY: resY,
+        newW: targetW,
+        newH: targetH,
+        guide: {
+          id: guideId,
+          orientation: 'horizontal',
+          position: Number(guidePosition.toFixed(2)),
+          color: 'red',
+        },
+        gapIndicator: gapInd,
+      });
+    }
+  };
+
+  // 遍历所有其他照片
+  for (const target of others) {
+    const tLeft = target.x;
+    const tRight = target.x + target.width;
+    const tTop = target.y;
+    const tBottom = target.y + target.height;
+
+    // X 轴吸附目标
+    if (isRightActive) {
+      // 1. 右边对齐 target 左边
+      solveByTargetX(tLeft, tLeft, `prop-right-left-${target.id}`);
+      // 2. 右边对齐 target 右边
+      solveByTargetX(tRight, tRight, `prop-right-right-${target.id}`);
+
+      // 3. 固定间隙：右边与 target 左边相距 fixedGap
+      if (fixedGapConfig?.enabled && fixedGapConfig.gapPercentX > 0) {
+        const gapTarget = tLeft - fixedGapConfig.gapPercentX;
+        const gapX = fixedGapConfig.gapPercentX;
+        solveByTargetX(gapTarget, tLeft, `prop-right-fixedgap-${target.id}`, {
+          id: `prop-gap-right-${target.id}`,
+          x: tLeft - gapX,
+          y: candY,
+          width: gapX,
+          height: candH,
+          orientation: 'horizontal',
+          label: `${fixedGapConfig.gapMm} mm`,
+        });
+      }
+    } else if (isLeftActive) {
+      // 1. 左边对齐 target 左边
+      solveByTargetX(tLeft, tLeft, `prop-left-left-${target.id}`);
+      // 2. 左边对齐 target 右边
+      solveByTargetX(tRight, tRight, `prop-left-right-${target.id}`);
+
+      // 3. 固定间隙：左边与 target 右边相距 fixedGap
+      if (fixedGapConfig?.enabled && fixedGapConfig.gapPercentX > 0) {
+        const gapTarget = tRight + fixedGapConfig.gapPercentX;
+        const gapX = fixedGapConfig.gapPercentX;
+        solveByTargetX(gapTarget, tRight, `prop-left-fixedgap-${target.id}`, {
+          id: `prop-gap-left-${target.id}`,
+          x: tRight,
+          y: candY,
+          width: gapX,
+          height: candH,
+          orientation: 'horizontal',
+          label: `${fixedGapConfig.gapMm} mm`,
+        });
+      }
+    }
+
+    // Y 轴吸附目标
+    if (isBottomActive) {
+      // 1. 底边对齐 target 顶边
+      solveByTargetY(tTop, tTop, `prop-bottom-top-${target.id}`);
+      // 2. 底边对齐 target 底边
+      solveByTargetY(tBottom, tBottom, `prop-bottom-bottom-${target.id}`);
+
+      // 3. 固定间隙：底边与 target 顶边相距 fixedGap
+      if (fixedGapConfig?.enabled && fixedGapConfig.gapPercentY > 0) {
+        const gapTarget = tTop - fixedGapConfig.gapPercentY;
+        const gapY = fixedGapConfig.gapPercentY;
+        solveByTargetY(gapTarget, tTop, `prop-bottom-fixedgap-${target.id}`, {
+          id: `prop-gap-bottom-${target.id}`,
+          x: candX,
+          y: tTop - gapY,
+          width: candW,
+          height: gapY,
+          orientation: 'vertical',
+          label: `${fixedGapConfig.gapMm} mm`,
+        });
+      }
+    } else if (isTopActive) {
+      // 1. 顶边对齐 target 顶边
+      solveByTargetY(tTop, tTop, `prop-top-top-${target.id}`);
+      // 2. 顶边对齐 target 底边
+      solveByTargetY(tBottom, tBottom, `prop-top-bottom-${target.id}`);
+
+      // 3. 固定间隙：顶边与 target 底边相距 fixedGap
+      if (fixedGapConfig?.enabled && fixedGapConfig.gapPercentY > 0) {
+        const gapTarget = tBottom + fixedGapConfig.gapPercentY;
+        const gapY = fixedGapConfig.gapPercentY;
+        solveByTargetY(gapTarget, tBottom, `prop-top-fixedgap-${target.id}`, {
+          id: `prop-gap-top-${target.id}`,
+          x: candX,
+          y: tBottom,
+          width: candW,
+          height: gapY,
+          orientation: 'vertical',
+          label: `${fixedGapConfig.gapMm} mm`,
+        });
+      }
+    }
+  }
+
+  // 页面边缘吸附 (0%, 100%)
+  if (isRightActive) solveByTargetX(100, 100, `prop-right-page-edge`);
+  if (isLeftActive) solveByTargetX(0, 0, `prop-left-page-edge`);
+  if (isBottomActive) solveByTargetY(100, 100, `prop-bottom-page-edge`);
+  if (isTopActive) solveByTargetY(0, 0, `prop-top-page-edge`);
+
+  if (candidates.length === 0) {
+    return {
+      x: candX,
+      y: candY,
+      width: candW,
+      height: candH,
+      guides: [],
+      spacingGaps: [],
+    };
+  }
+
+  // 按距离排序，选取最贴近当前手柄的吸附候选
+  candidates.sort((a, b) => a.distPx - b.distPx);
+  const best = candidates[0];
+
+  guides.push(best.guide);
+  if (best.gapIndicator) {
+    spacingGaps.push(best.gapIndicator);
+  }
+
+  // 检查是否恰好也有另一轴的辅助线与 best 接近
+  for (let i = 1; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (c.guide.orientation !== best.guide.orientation && Math.abs(c.distPx - best.distPx) < 4) {
+      guides.push(c.guide);
+      if (c.gapIndicator) {
+        spacingGaps.push(c.gapIndicator);
+      }
+      break;
+    }
+  }
+
+  return {
+    x: Number(best.newX.toFixed(2)),
+    y: Number(best.newY.toFixed(2)),
+    width: Math.max(5, Number(best.newW.toFixed(2))),
+    height: Math.max(5, Number(best.newH.toFixed(2))),
+    guides,
+    spacingGaps,
+  };
+}
+

@@ -1,15 +1,28 @@
 import { BookSpec, SpreadModel, UploadedPhoto, FrameSlot } from '../types/editor';
 
-// 经典 8 寸方形相册规格
+// 经典 8 寸方形相册规格 (兼容 ProductSpec 规范)
 export const DEFAULT_BOOK_SPEC: BookSpec = {
   id: 'square_8inch',
+  productType: 'photobook',
   name: '完美好翻书-方8',
+  categoryName: '照片书',
   widthMm: 200,
   heightMm: 200,
   bleedMm: 3,
   safeMarginMm: 6,
   defaultPages: 20,
+  minPages: 16,
+  maxPages: 80,
+  pageStep: 2,
   canvasPixelSize: 2027,
+  layoutMode: 'dual_spread',
+  binding: {
+    type: 'glue_layflat',
+    spineWidthMm: 5,
+    gutterSafetyMm: 5,
+    bindingEdge: 'left',
+  },
+  coverType: 'softcover',
 };
 
 // 丰富的版式模板库 (支持单页与跨页双模式)

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Image as ImageIcon,
   Camera,
@@ -9,33 +10,49 @@ import {
   Move,
   Copy,
   AlertTriangle,
+  ArrowLeftRight,
+  FlipHorizontal,
+  Maximize,
+  Layers,
+  ChevronsUp,
+  ChevronsDown,
+  Shapes,
+  Square,
+  Sparkles,
+  Search,
+  Check,
+  Palette,
+  SlidersHorizontal,
+  Sun,
+  Maximize2,
+  Scan,
 } from 'lucide-react';
-import { FrameSlot, UploadedPhoto, PhotoCrop, BookSpec, SpacingConfig, FixedGapConfig } from '../types/editor';
-import { calculateMoveSnap, calculateResizeSnap, GuideLine, SpacingGap } from '../utils/snapEngine';
+import {
+  FrameSlot,
+  UploadedPhoto,
+  PhotoCrop,
+  BookSpec,
+  SpacingConfig,
+  FixedGapConfig,
+  MaskShape,
+  FitMode,
+} from '../types/editor';
+import {
+  calculateMoveSnap,
+  calculateResizeSnap,
+  calculateProportionalResizeSnap,
+  GuideLine,
+  SpacingGap,
+} from '../utils/snapEngine';
 
-// 1:1 米莫印品 小手平移图标 (细线矢量轮廓)
-const IconMemoHand: React.FC<{ isGrabbing?: boolean }> = ({ isGrabbing }) => (
+// 1:1 精准复刻：舒展四向实心移动箭头 (长十字柄 + 锐利分离箭头，绝不粘连挤压)
+const IconMoveCross: React.FC<{ className?: string }> = ({ className = 'w-4.5 h-4.5' }) => (
   <svg
-    className="w-4 h-4 text-[#333333] select-none pointer-events-none"
     viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.6"
-    strokeLinecap="round"
-    strokeLinejoin="round"
+    fill="currentColor"
+    className={className}
   >
-    {isGrabbing ? (
-      /* 握拳抓取状态 */
-      <path d="M18 11V8a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3M14 10V8a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3M10 11V9a2 2 0 0 0-2-2 2 2 0 0 0-2 2v5a7 7 0 0 0 7 7h1a7 7 0 0 0 7-7v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
-    ) : (
-      /* 米莫同款 张开手掌线框 */
-      <>
-        <path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v5" />
-        <path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v6" />
-        <path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8" />
-        <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
-      </>
-    )}
+    <path d="M 12 1.5 L 16.2 6.5 H 13.2 V 10.8 H 17.5 V 7.8 L 22.5 12 L 17.5 16.2 V 13.2 H 13.2 V 17.5 H 16.2 L 12 22.5 L 7.8 17.5 H 10.8 V 13.2 H 6.5 V 16.2 L 1.5 12 L 6.5 7.8 V 10.8 H 10.8 V 6.5 H 7.8 Z" />
   </svg>
 );
 
@@ -71,6 +88,105 @@ const IconWarningTriangle: React.FC<{ isSevere?: boolean }> = ({ isSevere }) => 
   </svg>
 );
 
+// 左右对调双向箭头图标 (精致细腻、圆润倒角、间距舒适)
+const IconHorizontalSwapArrows: React.FC<{ className?: string }> = ({ className = 'w-3.5 h-3.5' }) => (
+  <svg
+    viewBox="0 0 20 20"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.55"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M 3.8 5.8 H 15.8" />
+    <path d="M 12 2.2 L 15.8 5.8 L 12 9.4" />
+    <path d="M 16.2 14.2 H 4.2" />
+    <path d="M 8 10.6 L 4.2 14.2 L 8 17.8" />
+  </svg>
+);
+
+// 适应照片框图标 (取景框四角 + 居中圆角小方块，1:1 精确复刻)
+const IconFitFrame: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    {/* 四个圆角取景拐角 */}
+    <path
+      d="M4 8.5V6a2 2 0 0 1 2-2h2.5 M15.5 4H18a2 2 0 0 1 2 2v2.5 M20 15.5V18a2 2 0 0 1-2 2h-2.5 M8.5 20H6a2 2 0 0 1-2-2v-2.5"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    {/* 居中圆角实心矩形 */}
+    <rect
+      x="7.5"
+      y="7.5"
+      width="9"
+      height="9"
+      rx="2"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+// 米莫风格水平翻转图标：左右相对双三角形 + 中间垂直虚线镜像轴 (左镂空、右实心)
+const IconFlipHorizontalMomo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    {/* 中间垂直虚线镜像轴 */}
+    <line x1="12" y1="3.5" x2="12" y2="20.5" stroke="currentColor" strokeWidth="1.6" strokeDasharray="2 2" strokeLinecap="round" />
+    {/* 左侧线框三角 */}
+    <polygon points="4,6 10,12 4,18" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" fill="none" />
+    {/* 右侧实心三角 */}
+    <polygon points="20,6 14,12 20,18" fill="currentColor" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+  </svg>
+);
+
+// 米莫风格满屏图标 (四个圆角取景拐角)
+const IconFullScreenMomo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M4 9V6a2 2 0 0 1 2-2h3" />
+    <path d="M20 9V6a2 2 0 0 0-2-2h-3" />
+    <path d="M4 15v3a2 2 0 0 0 2 2h3" />
+    <path d="M20 15v3a2 2 0 0 1-2 2h-3" />
+  </svg>
+);
+
+// 异形遮罩计算样式
+const getMaskStyle = (maskShape?: string): React.CSSProperties => {
+  if (!maskShape || maskShape === 'none') return {};
+  switch (maskShape) {
+    case 'circle':
+      return { clipPath: 'circle(50% at 50% 50%)' };
+    case 'heart':
+      return {
+        clipPath:
+          'polygon(50% 15%, 62% 0%, 82% 0%, 100% 18%, 100% 40%, 50% 95%, 0% 40%, 0% 18%, 18% 0%, 38% 0%)',
+      };
+    case 'star':
+      return {
+        clipPath:
+          'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+      };
+    case 'diamond':
+      return { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' };
+    case 'triangle':
+      return { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' };
+    case 'hexagon':
+      return { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' };
+    case 'arch':
+      return { borderRadius: '1000px 1000px 0 0' };
+    default:
+      return {};
+  }
+};
+
+// 导出供外部使用的画框尺寸测量结构
+export interface FrameSlotDimensions {
+  widthMm: number;
+  heightMm: number;
+  recommendedPixels: string;
+}
+
 interface PhotoFrameProps {
   slot: FrameSlot;
   photo?: UploadedPhoto;
@@ -83,11 +199,20 @@ interface PhotoFrameProps {
   onDropPhoto: (photoId: string) => void;
   onUpdateCrop: (crop: PhotoCrop) => void;
   onClearPhoto: () => void;
+  onUpdateSlotProps?: (props: Partial<FrameSlot>) => void;
+  onBringForward?: () => void;
+  onSendBackward?: () => void;
+  onBringToFront?: () => void;
+  onSendToBack?: () => void;
+  onMakeFullScreen?: () => void;
+  onLocatePhoto?: (photoId: string) => void;
   onUpdateText?: (text: string) => void;
   onUpdateBounds?: (bounds: { x: number; y: number; width: number; height: number; rotation?: number }) => void;
   onCommitBounds?: () => void;
   onDeleteSlot?: () => void;
   onDuplicateSlot?: () => void;
+  onStartSwapDrag?: (e: React.MouseEvent) => void;
+  isSwapTargetHovered?: boolean;
   onUpdateGuides?: (guides: GuideLine[], spacingGaps?: SpacingGap[]) => void;
   onClearGuides?: () => void;
   onStartMultiDrag?: (e: React.MouseEvent, clickedSlotId: string) => void;
@@ -98,6 +223,31 @@ interface PhotoFrameProps {
 }
 
 type ResizeHandleType = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+// 预设计经典边框颜色
+const PRESET_BORDER_COLORS = [
+  { name: '纯白', value: '#ffffff' },
+  { name: '奶油白', value: '#faf6f0' },
+  { name: '曜石黑', value: '#1c1917' },
+  { name: '勃艮第红', value: '#76383d' },
+  { name: '香槟金', value: '#c5a880' },
+  { name: '暖灰', value: '#9ca3af' },
+  { name: '复古蓝', value: '#1e3a8a' },
+  { name: '松针绿', value: '#14532d' },
+];
+
+// 预设异形遮罩
+const PRESET_MASKS: { id: MaskShape; name: string; icon: string }[] = [
+  { id: 'none', name: '矩形 (原框)', icon: '▢' },
+  { id: 'circle', name: '正圆形', icon: '○' },
+  { id: 'arch', name: '拱门形', icon: '☖' },
+  { id: 'heart', name: '心形', icon: '♥' },
+  { id: 'star', name: '五角星', icon: '★' },
+  { id: 'diamond', name: '菱形', icon: '◇' },
+  { id: 'hexagon', name: '六边形', icon: '⬡' },
+  { id: 'pill', name: '胶囊跑道', icon: '⬭' },
+  { id: 'stamp', name: '复古邮票', icon: '▦' },
+];
 
 export const PhotoFrame: React.FC<PhotoFrameProps> = ({
   slot,
@@ -112,11 +262,20 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
   onDropPhoto,
   onUpdateCrop,
   onClearPhoto,
+  onUpdateSlotProps,
+  onBringForward,
+  onSendBackward,
+  onBringToFront,
+  onSendToBack,
+  onMakeFullScreen,
+  onLocatePhoto,
   onUpdateText,
   onUpdateBounds,
   onCommitBounds,
   onDeleteSlot,
   onDuplicateSlot,
+  onStartSwapDrag,
+  isSwapTargetHovered = false,
   onUpdateGuides,
   onClearGuides,
   onStartMultiDrag,
@@ -124,11 +283,11 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
   hairlineThickness = 1,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
-  const [isEditingCrop, setIsEditingCrop] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
   const [textVal, setTextVal] = useState(slot.text || '');
+  const [activePopover, setActivePopover] = useState<'mask' | 'border' | 'effects' | 'layers' | null>(null);
 
-  // 1. 照片内部裁剪/平移状态
+  // 1. 照片内部裁剪/平移状态 (方案1：按住即平移，松手即完成，无需二次确认)
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef<{ x: number; y: number; cropX: number; cropY: number }>({
     x: 0,
@@ -186,10 +345,28 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
   const frameRef = useRef<HTMLDivElement>(null);
   const crop = slot.crop || { x: 50, y: 50, scale: 1.0, rotation: 0 };
 
+  // 丝滑滚轮缩放状态 (RAF 阻尼插值系统)
+  const [activeScale, setActiveScale] = useState<number>(crop.scale || 1.0);
+  const currentScaleRef = useRef<number>(crop.scale || 1.0);
+  const targetScaleRef = useRef<number>(crop.scale || 1.0);
+  const isWheelingRef = useRef<boolean>(false);
+  const rafIdRef = useRef<number | null>(null);
+  const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 当外部 crop.scale 更新且用户当前未在滚动滚轮时，同步本地状态
+  useEffect(() => {
+    if (!isWheelingRef.current) {
+      const s = crop.scale || 1.0;
+      currentScaleRef.current = s;
+      targetScaleRef.current = s;
+      setActiveScale(s);
+    }
+  }, [crop.scale]);
+
   // 计算照片是否大于画框（存在裁剪溢出或放大状态，此时显示米莫小手平移按钮）
   const isPhotoOverflowing = useMemo(() => {
     if (!photo) return false;
-    if ((crop.scale || 1) > 1.02) return true;
+    if ((activeScale || 1) > 1.02) return true;
     const frameW = slot.width * (bookSpec?.widthMm || 200);
     const frameH = slot.height * (bookSpec?.heightMm || 200);
     if (frameW <= 0 || frameH <= 0) return false;
@@ -200,7 +377,7 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
     if (!pW || !pH) return true;
     const photoRatio = pW / pH;
     return Math.abs(frameRatio - photoRatio) > 0.015;
-  }, [photo, slot.width, slot.height, bookSpec, crop.scale, crop.rotation]);
+  }, [photo, slot.width, slot.height, bookSpec, activeScale, crop.rotation]);
 
   useEffect(() => {
     setTextVal(slot.text || '');
@@ -239,14 +416,41 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
       const frameW = rect?.width || 200;
       const frameH = rect?.height || 200;
 
-      // 物理级 1:1 敏捷跟随：
-      // 在放大模式下，只要照片被放大或有裁剪溢出，直接允许 0-100% 自由全向调节
-      const scale = Math.max(1.0, crop.scale || 1.0);
-      const sensitivityX = (100 / Math.max(frameW, 50)) * scale;
-      const sensitivityY = (100 / Math.max(frameH, 50)) * scale;
+      // 真实数学几何 1:1 绝对跟手算法：
+      // 在 CSS 中，img 设置了 object-fit: cover
+      // 1. 计算未放大时 img 的实际渲染包络尺寸 (coverBoxW, coverBoxH)
+      const isRotated = (crop.rotation || 0) % 180 !== 0;
+      const photoNaturalW = isRotated ? (photo.naturalHeight || 1) : (photo.naturalWidth || 1);
+      const photoNaturalH = isRotated ? (photo.naturalWidth || 1) : (photo.naturalHeight || 1);
+      const photoAspect = photoNaturalW / photoNaturalH;
+      const frameAspect = frameW / Math.max(1, frameH);
 
-      const newX = Math.max(0, Math.min(100, panStartRef.current.cropX - dx * sensitivityX));
-      const newY = Math.max(0, Math.min(100, panStartRef.current.cropY - dy * sensitivityY));
+      let coverBoxW = frameW;
+      let coverBoxH = frameH;
+      if (photoAspect > frameAspect) {
+        // 照片更宽：高度贴合画框，宽度向两侧溢出
+        coverBoxW = frameH * photoAspect;
+      } else {
+        // 照片更高：宽度贴合画框，高度向上下溢出
+        coverBoxH = frameW / photoAspect;
+      }
+
+      // 2. 计算放大后照片在画框中的真实总可移动物理像素区间 (travelPixelW, travelPixelH)
+      // 在 scale 放大与 objectPosition 共同作用下：
+      // 总物理可移动像素 = (coverBoxW - frameW) + (scale - 1) * coverBoxW
+      // 即 travelPixel = coverBox * (scale - 1) + (coverBox - frame)
+      const scale = Math.max(1.0, activeScale || crop.scale || 1.0);
+      const travelW = Math.max(1, (coverBoxW * scale) - frameW);
+      const travelH = Math.max(1, (coverBoxH * scale) - frameH);
+
+      // 3. 当鼠标在屏幕上移动 dx 像素时，crop.x (0~100) 变化的物理精确比例：
+      // 采用轻快手感增益倍率 (1.35x)，让拖拽移动更省力、响应更灵动敏捷
+      const SPEED_MULTIPLIER = 1.35;
+      const deltaXPercent = (dx / travelW) * 100 * SPEED_MULTIPLIER;
+      const deltaYPercent = (dy / travelH) * 100 * SPEED_MULTIPLIER;
+
+      const newX = Math.max(0, Math.min(100, panStartRef.current.cropX - deltaXPercent));
+      const newY = Math.max(0, Math.min(100, panStartRef.current.cropY - deltaYPercent));
 
       onUpdateCrop({
         ...crop,
@@ -280,9 +484,14 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
     height: number;
   } | null>(null);
 
+  // 外部 slot 尺寸/坐标变化时自动清空本地临时快照
+  useEffect(() => {
+    setLocalBounds(null);
+  }, [slot.x, slot.y, slot.width, slot.height, slot.rotation]);
+
   // --- 画框整体在页面内的拖拽移动 (Move + 智能磁吸对齐，且支持多选整体拖拽) ---
   const handleStartMoveFrame = (e: React.MouseEvent) => {
-    if (isEditingCrop || isEditingText) return;
+    if (isEditingText) return;
     e.stopPropagation();
 
     // 如果按下 Ctrl / Cmd / Shift，进行多选增量切换
@@ -446,62 +655,197 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
       let newHeight = initialH;
 
       const minSize = 8; // 最小尺寸百分比
+      const isCornerHandle = ['nw', 'ne', 'se', 'sw'].includes(handle);
+      // 默认对角线锚点锁定等比例缩放（按住 Shift 时可临时切换为自由缩放；非对角线边缘锚点为自由拉伸）
+      const lockAspectRatio = isCornerHandle ? !moveEvt.shiftKey : moveEvt.shiftKey;
 
-      // 根据拖动的锚点方向计算候选坐标与宽高
-      if (handle.includes('e')) {
-        newWidth = Math.max(minSize, Math.min(100 - newX, initialW + dxPercent));
-      }
-      if (handle.includes('s')) {
-        newHeight = Math.max(minSize, Math.min(100 - newY, initialH + dyPercent));
-      }
-      if (handle.includes('w')) {
-        const potentialWidth = initialW - dxPercent;
-        if (potentialWidth >= minSize) {
-          newX = Math.max(0, initialX + dxPercent);
-          newWidth = potentialWidth;
+      if (lockAspectRatio) {
+        // ========== 1. 对角线等比例缩放 (平滑对角投影算法，彻底杜绝抖动) ==========
+        const initialPixelW = (initialW / 100) * parentW;
+        const initialPixelH = (initialH / 100) * parentH;
+        const initialDiagonal = Math.hypot(initialPixelW, initialPixelH) || 1;
+        const cosTheta = initialPixelW / initialDiagonal;
+        const sinTheta = initialPixelH / initialDiagonal;
+
+        // 将鼠标位移向量 (dx, dy) 投影到对角线方向向量上，平滑连续，无跳跃突变
+        let proj = 0;
+        if (handle === 'se') {
+          proj = dx * cosTheta + dy * sinTheta;
+        } else if (handle === 'sw') {
+          proj = -dx * cosTheta + dy * sinTheta;
+        } else if (handle === 'ne') {
+          proj = dx * cosTheta - dy * sinTheta;
+        } else if (handle === 'nw') {
+          proj = -dx * cosTheta - dy * sinTheta;
         }
-      }
-      if (handle.includes('n')) {
-        const potentialHeight = initialH - dyPercent;
-        if (potentialHeight >= minSize) {
-          newY = Math.max(0, initialY + dyPercent);
-          newHeight = potentialHeight;
+
+        const minPixelW = (minSize / 100) * parentW;
+        const minPixelH = (minSize / 100) * parentH;
+        const scale = Math.max(
+          minPixelW / initialPixelW,
+          minPixelH / initialPixelH,
+          (initialDiagonal + proj) / initialDiagonal
+        );
+
+        let targetPixelW = initialPixelW * scale;
+        let targetPixelH = initialPixelH * scale;
+
+        let targetWidthPercent = (targetPixelW / parentW) * 100;
+        let targetHeightPercent = (targetPixelH / parentH) * 100;
+
+        // 根据不同角固定对应相反支点 (Pivot)
+        if (handle === 'se') {
+          // 固定左上角 (initialX, initialY)
+          const maxScaleW = (100 - initialX) / (initialW || 1);
+          const maxScaleH = (100 - initialY) / (initialH || 1);
+          const maxAllowedScale = Math.min(maxScaleW, maxScaleH);
+          const finalScale = Math.min(scale, Math.max(1, maxAllowedScale));
+
+          targetWidthPercent = initialW * finalScale;
+          targetHeightPercent = initialH * finalScale;
+
+          newX = initialX;
+          newY = initialY;
+          newWidth = targetWidthPercent;
+          newHeight = targetHeightPercent;
+        } else if (handle === 'sw') {
+          // 固定右上角 (initialX + initialW, initialY)
+          const fixedRight = initialX + initialW;
+          const maxScaleW = fixedRight / (initialW || 1);
+          const maxScaleH = (100 - initialY) / (initialH || 1);
+          const maxAllowedScale = Math.min(maxScaleW, maxScaleH);
+          const finalScale = Math.min(scale, Math.max(1, maxAllowedScale));
+
+          targetWidthPercent = initialW * finalScale;
+          targetHeightPercent = initialH * finalScale;
+
+          newX = fixedRight - targetWidthPercent;
+          newY = initialY;
+          newWidth = targetWidthPercent;
+          newHeight = targetHeightPercent;
+        } else if (handle === 'ne') {
+          // 固定左下角 (initialX, initialY + initialH)
+          const fixedBottom = initialY + initialH;
+          const maxScaleW = (100 - initialX) / (initialW || 1);
+          const maxScaleH = fixedBottom / (initialH || 1);
+          const maxAllowedScale = Math.min(maxScaleW, maxScaleH);
+          const finalScale = Math.min(scale, Math.max(1, maxAllowedScale));
+
+          targetWidthPercent = initialW * finalScale;
+          targetHeightPercent = initialH * finalScale;
+
+          newX = initialX;
+          newY = fixedBottom - targetHeightPercent;
+          newWidth = targetWidthPercent;
+          newHeight = targetHeightPercent;
+        } else if (handle === 'nw') {
+          // 固定右下角 (initialX + initialW, initialY + initialH)
+          const fixedRight = initialX + initialW;
+          const fixedBottom = initialY + initialH;
+          const maxScaleW = fixedRight / (initialW || 1);
+          const maxScaleH = fixedBottom / (initialH || 1);
+          const maxAllowedScale = Math.min(maxScaleW, maxScaleH);
+          const finalScale = Math.min(scale, Math.max(1, maxAllowedScale));
+
+          targetWidthPercent = initialW * finalScale;
+          targetHeightPercent = initialH * finalScale;
+
+          newX = fixedRight - targetWidthPercent;
+          newY = fixedBottom - targetHeightPercent;
+          newWidth = targetWidthPercent;
+          newHeight = targetHeightPercent;
+        }
+      } else {
+        // ========== 2. 4 条边中点手柄或按住 Shift 时的自由单向拉伸 ==========
+        if (handle.includes('e')) {
+          newWidth = Math.max(minSize, Math.min(100 - newX, initialW + dxPercent));
+        }
+        if (handle.includes('s')) {
+          newHeight = Math.max(minSize, Math.min(100 - newY, initialH + dyPercent));
+        }
+        if (handle.includes('w')) {
+          const potentialWidth = initialW - dxPercent;
+          if (potentialWidth >= minSize) {
+            newX = Math.max(0, initialX + dxPercent);
+            newWidth = potentialWidth;
+          }
+        }
+        if (handle.includes('n')) {
+          const potentialHeight = initialH - dyPercent;
+          if (potentialHeight >= minSize) {
+            newY = Math.max(0, initialY + dyPercent);
+            newHeight = potentialHeight;
+          }
         }
       }
 
       // 计算拉伸过程中的边缘吸附（基于屏幕物理像素，支持固定间隙保持）
-      const snapRes = calculateResizeSnap(
-        slot.id,
-        newX,
-        newY,
-        newWidth,
-        newHeight,
-        handle,
-        otherSlotsSnapshot,
-        parentW,
-        parentH,
-        fixedGapConfig
-      );
+      let finalX = newX;
+      let finalY = newY;
+      let finalW = newWidth;
+      let finalH = newHeight;
 
-      currentSnappedX = snapRes.x;
-      currentSnappedY = snapRes.y;
-      currentSnappedW = snapRes.width;
-      currentSnappedH = snapRes.height;
+      if (!lockAspectRatio) {
+        const snapRes = calculateResizeSnap(
+          slot.id,
+          newX,
+          newY,
+          newWidth,
+          newHeight,
+          handle,
+          otherSlotsSnapshot,
+          parentW,
+          parentH,
+          fixedGapConfig
+        );
+        finalX = snapRes.x;
+        finalY = snapRes.y;
+        finalW = snapRes.width;
+        finalH = snapRes.height;
+        if (snapRes.guides.length > 0 || snapRes.spacingGaps.length > 0) {
+          onUpdateGuides?.(snapRes.guides, snapRes.spacingGaps);
+        } else {
+          onClearGuides?.();
+        }
+      } else {
+        const snapRes = calculateProportionalResizeSnap(
+          slot.id,
+          { x: initialX, y: initialY, width: initialW, height: initialH },
+          { x: newX, y: newY, width: newWidth, height: newHeight },
+          handle as 'nw' | 'ne' | 'se' | 'sw',
+          otherSlotsSnapshot,
+          parentW,
+          parentH,
+          fixedGapConfig
+        );
+        finalX = snapRes.x;
+        finalY = snapRes.y;
+        finalW = snapRes.width;
+        finalH = snapRes.height;
+        if (snapRes.guides.length > 0 || snapRes.spacingGaps.length > 0) {
+          onUpdateGuides?.(snapRes.guides, snapRes.spacingGaps);
+        } else {
+          onClearGuides?.();
+        }
+      }
+
+      currentSnappedX = finalX;
+      currentSnappedY = finalY;
+      currentSnappedW = finalW;
+      currentSnappedH = finalH;
 
       setLocalBounds({
-        x: snapRes.x,
-        y: snapRes.y,
-        width: snapRes.width,
-        height: snapRes.height,
+        x: finalX,
+        y: finalY,
+        width: finalW,
+        height: finalH,
       });
 
-      onUpdateGuides?.(snapRes.guides, snapRes.spacingGaps);
-
       onUpdateBounds?.({
-        x: snapRes.x,
-        y: snapRes.y,
-        width: snapRes.width,
-        height: snapRes.height,
+        x: finalX,
+        y: finalY,
+        width: finalW,
+        height: finalH,
       });
     };
 
@@ -526,52 +870,300 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
     window.addEventListener('mouseup', handleResizeMouseUp);
   };
 
+  // 4. 自由旋转把手交互 (米莫同款：顶部旋转手柄 + 实时角度气泡 + 中心纵向辅助虚线 + 0°/90°/180° 磁吸)
+  const [isRotating, setIsRotating] = useState(false);
+  const [rotateTooltipAngle, setRotateTooltipAngle] = useState<number | null>(null);
+
+  const handleStartRotate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const frameEl = frameRef.current;
+    if (!frameEl) return;
+
+    const rect = frameEl.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const startSlotRotation = slot.rotation || 0;
+    // 鼠标相对于中心的初始弧度转角度
+    const startMouseAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * (180 / Math.PI);
+
+    let currentAngle = startSlotRotation;
+    let hasMoved = false;
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+
+    setIsRotating(true);
+    setRotateTooltipAngle(startSlotRotation);
+
+    const handleRotateMouseMove = (moveEvt: MouseEvent) => {
+      const dist = Math.hypot(moveEvt.clientX - startClientX, moveEvt.clientY - startClientY);
+      if (dist > 3) {
+        hasMoved = true;
+      }
+
+      const currentMouseAngle = Math.atan2(moveEvt.clientY - centerY, moveEvt.clientX - centerX) * (180 / Math.PI);
+      const deltaAngle = currentMouseAngle - startMouseAngle;
+      let rawAngle = (startSlotRotation + deltaAngle) % 360;
+
+      // 规范化到 [-180, 180] 范围（呈现 -7°, 45°, 90° 等直观角度）
+      if (rawAngle > 180) rawAngle -= 360;
+      if (rawAngle < -180) rawAngle += 360;
+
+      // 智能磁吸吸附（米莫同款：在 0°, ±90°, ±180° 等关键中心轴附近自动磁吸对齐，吸附阈值 ±4°）
+      const snapAngles = [0, 90, 180, -90, -180, 45, 135, -45, -135];
+      const snapThreshold = 4.0; // 吸附范围 ±4.0 度
+
+      let finalAngle = rawAngle;
+      for (const snap of snapAngles) {
+        if (Math.abs(rawAngle - snap) <= snapThreshold) {
+          finalAngle = snap;
+          break;
+        }
+      }
+
+      const roundedAngle = Math.round(finalAngle);
+      currentAngle = roundedAngle;
+
+      // 仅更新局部状态，提供 60fps 丝滑无抖动的 GPU 硬件加速旋转体验
+      setLocalBounds((prev) => ({
+        ...(prev || {
+          x: slot.x,
+          y: slot.y,
+          width: slot.width,
+          height: slot.height,
+        }),
+        rotation: roundedAngle,
+      }));
+      setRotateTooltipAngle(roundedAngle);
+    };
+
+    const handleRotateMouseUp = () => {
+      window.removeEventListener('mousemove', handleRotateMouseMove);
+      window.removeEventListener('mouseup', handleRotateMouseUp);
+
+      setIsRotating(false);
+      setRotateTooltipAngle(null);
+
+      // 若发生了拖拽旋转，提交最终角度；若仅是点击则不作任何旋转更改 (纯自由旋转)
+      if (hasMoved) {
+        setLocalBounds((prev) => (prev ? { ...prev, rotation: currentAngle } : null));
+        onUpdateBounds?.({
+          x: slot.x,
+          y: slot.y,
+          width: slot.width,
+          height: slot.height,
+          rotation: currentAngle,
+        });
+        onCommitBounds?.();
+      }
+    };
+
+    window.addEventListener('mousemove', handleRotateMouseMove);
+    window.addEventListener('mouseup', handleRotateMouseUp);
+  };
+
+  // 照片在画框内部顺时针旋转 90°
   const handleRotate = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const nextRotation = ((crop.rotation || 0) + 90) % 360;
-    onUpdateCrop({ ...crop, rotation: nextRotation });
+    if (!photo) return;
+    const currentRot = crop.rotation || 0;
+    const nextRot = (currentRot + 90) % 360;
+    onUpdateCrop({
+      ...crop,
+      rotation: nextRot,
+    });
+  };
+
+  // 一键满屏点击处理 (清空本地临时 bounds 确保整页展开)
+  const handleMakeFullScreenClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLocalBounds(null);
+    onMakeFullScreen?.();
   };
 
   const handleScaleChange = (newScale: number) => {
-    onUpdateCrop({ ...crop, scale: Math.max(1.0, Math.min(3.0, Number(newScale.toFixed(2)))) });
+    const clamped = Math.max(1.0, Math.min(3.0, Number(newScale.toFixed(2))));
+    currentScaleRef.current = clamped;
+    targetScaleRef.current = clamped;
+    setActiveScale(clamped);
+    onUpdateCrop({ ...crop, scale: clamped });
   };
 
-  // 4. 鼠标滚轮悬停缩放（当画框被选中且包含照片时，滚动鼠标中键滚轮直接放大/缩小照片）
+  // 点击【适应框】：画框外框与照片双向 100% 贴合，按照照片原始宽高比自动重新计算画框的宽高与居中坐标
+  const handleFitFrameToPhoto = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!photo) return;
+
+    // 1. 获取照片原始宽高比 (考虑照片内部旋转 90/270 度)
+    const rot = (crop.rotation || 0) % 180;
+    const rawW = photo.naturalWidth || 800;
+    const rawH = photo.naturalHeight || 600;
+    const effectivePhotoW = rot === 90 ? rawH : rawW;
+    const effectivePhotoH = rot === 90 ? rawW : rawH;
+    const photoAspect = effectivePhotoW / effectivePhotoH;
+
+    // 2. 页面物理毫米尺寸转换，保证在画布上保持无畸变的真实比例
+    const pageW_mm = bookSpec?.widthMm || 200;
+    const pageH_mm = bookSpec?.heightMm || 200;
+    const currentW_mm = (currentRenderW * pageW_mm) / 100;
+    const currentH_mm = (currentRenderH * pageH_mm) / 100;
+    const currentFrameAspect = currentW_mm / currentH_mm;
+
+    let newW_mm = currentW_mm;
+    let newH_mm = currentH_mm;
+
+    if (photoAspect > currentFrameAspect) {
+      // 照片比画框更宽：以当前宽度为基准，收缩高度贴合照片
+      newH_mm = currentW_mm / photoAspect;
+    } else {
+      // 照片比画框更高：以当前高度为基准，收缩宽度贴合照片
+      newW_mm = currentH_mm * photoAspect;
+    }
+
+    // 3. 转换回页面百分比尺寸
+    let newPercentW = (newW_mm / pageW_mm) * 100;
+    let newPercentH = (newH_mm / pageH_mm) * 100;
+
+    // 限制在页面可视范围内
+    if (newPercentW > 98) {
+      const scaleDown = 98 / newPercentW;
+      newPercentW *= scaleDown;
+      newPercentH *= scaleDown;
+    }
+    if (newPercentH > 98) {
+      const scaleDown = 98 / newPercentH;
+      newPercentW *= scaleDown;
+      newPercentH *= scaleDown;
+    }
+
+    // 4. 计算新中心点，保持画框原几何中心不变
+    const centerX = currentRenderX + currentRenderW / 2;
+    const centerY = currentRenderY + currentRenderH / 2;
+    let newX = centerX - newPercentW / 2;
+    let newY = centerY - newPercentH / 2;
+
+    // 边界保护
+    newX = Math.max(0, Math.min(100 - newPercentW, newX));
+    newY = Math.max(0, Math.min(100 - newPercentH, newY));
+
+    // 5. 复位内部缩放与裁剪为标准 1.0x 居中，确保 100% 满画框且无白边无裁切
+    handleScaleChange(1.0);
+    onUpdateCrop({ ...crop, x: 50, y: 50, scale: 1.0 });
+    onUpdateSlotProps?.({ fitMode: 'cover' });
+
+    // 6. 提交新的画框外框几何边界
+    onUpdateBounds?.({
+      x: Number(newX.toFixed(2)),
+      y: Number(newY.toFixed(2)),
+      width: Number(newPercentW.toFixed(2)),
+      height: Number(newPercentH.toFixed(2)),
+      rotation: slot.rotation || 0,
+    });
+    onCommitBounds?.();
+  };
+
+  // 双击画框：智能快速居中复位构图 (若已居中则平滑微放大至 1.25x 便于细调)
+  const handleDoubleClickPhoto = (e: React.MouseEvent) => {
+    if (!photo) return;
+    e.stopPropagation();
+    if ((crop.scale && crop.scale > 1.05) || crop.x !== 50 || crop.y !== 50) {
+      // 快速复位到 1:1 标准居中
+      handleScaleChange(1.0);
+      onUpdateCrop({ ...crop, x: 50, y: 50, scale: 1.0 });
+      onCommitBounds?.();
+    } else {
+      // 快速微放大至 1.25x
+      handleScaleChange(1.25);
+      onUpdateCrop({ ...crop, x: 50, y: 50, scale: 1.25 });
+      onCommitBounds?.();
+    }
+  };
+
+  // 4. 鼠标滚轮悬停缩放（当画框被选中且包含照片时，连续指数比例 + RAF 物理阻尼插值系统）
   useEffect(() => {
     const frameEl = frameRef.current;
-    if (!frameEl || !photo || (!isSelected && !isEditingCrop)) return;
+    if (!frameEl || !photo || !isSelected) return;
+
+    const animateZoom = () => {
+      const current = currentScaleRef.current;
+      const target = targetScaleRef.current;
+      const diff = target - current;
+
+      // 线性阻尼插值 (Lerp / Damping) - 0.22 阻尼系数带来如丝绸般自然的物理惯性平滑过渡
+      if (Math.abs(diff) > 0.001) {
+        const next = current + diff * 0.22;
+        currentScaleRef.current = next;
+        setActiveScale(next);
+        rafIdRef.current = requestAnimationFrame(animateZoom);
+      } else {
+        currentScaleRef.current = target;
+        setActiveScale(target);
+        rafIdRef.current = null;
+        isWheelingRef.current = false;
+
+        // 提交最终精确比例到全局状态
+        const finalScale = Number(target.toFixed(2));
+        onUpdateCrop({
+          ...crop,
+          scale: Math.max(1.0, Math.min(3.0, finalScale)),
+        });
+        onCommitBounds?.();
+      }
+    };
 
     const handleWheel = (e: WheelEvent) => {
       // 阻止浏览器和画布的默认滚动
       e.preventDefault();
       e.stopPropagation();
 
-      const currentScale = crop.scale || 1.0;
-      // deltaY > 0 为向下滚（缩小），deltaY < 0 为向上滚（放大）
-      const zoomStep = 0.05;
-      const direction = e.deltaY < 0 ? 1 : -1;
-      const targetScale = Math.max(1.0, Math.min(3.0, Number((currentScale + direction * zoomStep).toFixed(2))));
+      isWheelingRef.current = true;
 
-      if (targetScale !== currentScale) {
+      // 基于 deltaY 的指数连续比例缩放 (Exponential Scaling)
+      // 触控板微动与机械鼠标滚轮均能自动平滑适配
+      const zoomSensitivity = 0.0018;
+      const zoomFactor = Math.exp(-e.deltaY * zoomSensitivity);
+      const newTarget = Math.max(1.0, Math.min(3.0, targetScaleRef.current * zoomFactor));
+      targetScaleRef.current = newTarget;
+
+      if (!rafIdRef.current) {
+        rafIdRef.current = requestAnimationFrame(animateZoom);
+      }
+
+      // 防抖同步数据给外部（DPI 检测、属性栏）
+      if (commitTimeoutRef.current) {
+        clearTimeout(commitTimeoutRef.current);
+      }
+      commitTimeoutRef.current = setTimeout(() => {
+        const snapVal = Number(targetScaleRef.current.toFixed(2));
         onUpdateCrop({
           ...crop,
-          scale: targetScale,
+          scale: snapVal,
         });
-      }
+      }, 150);
     };
 
     // 使用 passive: false 确保能够成功执行 e.preventDefault() 拦截滚轮默认翻页
     frameEl.addEventListener('wheel', handleWheel, { passive: false });
     return () => {
       frameEl.removeEventListener('wheel', handleWheel);
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      if (commitTimeoutRef.current) {
+        clearTimeout(commitTimeoutRef.current);
+      }
     };
-  }, [photo, isSelected, isEditingCrop, crop, onUpdateCrop]);
+  }, [photo, isSelected, crop, onUpdateCrop, onCommitBounds]);
 
   // 动态根据页面基准分辨率 (2027 x 2027 px) 计算画框实际印刷像素尺寸
   const currentRenderX = localBounds?.x !== undefined ? localBounds.x : slot.x;
   const currentRenderY = localBounds?.y !== undefined ? localBounds.y : slot.y;
   const currentRenderW = localBounds?.width !== undefined ? localBounds.width : slot.width;
   const currentRenderH = localBounds?.height !== undefined ? localBounds.height : slot.height;
+  const currentRotation = localBounds?.rotation !== undefined ? localBounds.rotation : (slot.rotation || 0);
 
   const currentPixelW = Math.round((2027 * currentRenderW) / 100);
   const currentPixelH = Math.round((2027 * currentRenderH) / 100);
@@ -608,7 +1200,7 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
 
     // 3. 计算用于填充当前画框区域的有效像素（考虑 scale 放大因素）
     // scale 越大，画框内截取的照片区域越小，有效像素越少
-    const currentScale = Math.max(1.0, crop.scale || 1.0);
+    const currentScale = Math.max(1.0, activeScale || 1.0);
     const frameAspect = currentRenderW / Math.max(0.01, currentRenderH);
     const photoAspect = photoOrigW / Math.max(0.01, photoOrigH);
 
@@ -648,6 +1240,62 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
     };
   }, [photo, crop.scale, crop.rotation, currentRenderW, currentRenderH, bookSpec, currentPixelW, currentPixelH]);
 
+  // 计算旋转后 Y 方向的扩展高度 (百分比)，用于将底部操作栏精准定位在旋转图形正下方 (米莫同款)
+  const rad = (((currentRotation || 0) * Math.PI) / 180);
+  const hw = currentRenderW / 2;
+  const hh = currentRenderH / 2;
+  const yExtent = hw * Math.abs(Math.sin(rad)) + hh * Math.abs(Math.cos(rad));
+  const extraYOffset = yExtent - hh; // 旋转带来的额外向下延伸百分比
+
+  // 全局 Portal 浮动条坐标实时计算 (彻底解决被下层文字框或兄弟元素层叠遮挡的问题)
+  const [toolbarPos, setToolbarPos] = useState<{ left: number; top: number; placeAbove?: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!isSelected || hasMultipleSelection || isRotating) {
+      setToolbarPos(null);
+      return;
+    }
+
+    const updateToolbarPosition = () => {
+      if (!frameRef.current) return;
+      const rect = frameRef.current.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+
+      const viewportHeight = window.innerHeight;
+      const centerX = rect.left + rect.width / 2;
+      
+      // 默认放置在下方；若距离视口底部不足 70px 则智能翻转到上方
+      const placeAbove = rect.bottom + 68 > viewportHeight && rect.top > 70;
+      const topY = placeAbove ? (rect.top - 8) : (rect.bottom + 8);
+
+      setToolbarPos({
+        left: centerX,
+        top: topY,
+        placeAbove,
+      });
+    };
+
+    updateToolbarPosition();
+    const animId = requestAnimationFrame(updateToolbarPosition);
+    window.addEventListener('scroll', updateToolbarPosition, true);
+    window.addEventListener('resize', updateToolbarPosition);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener('scroll', updateToolbarPosition, true);
+      window.removeEventListener('resize', updateToolbarPosition);
+    };
+  }, [
+    isSelected,
+    hasMultipleSelection,
+    isRotating,
+    currentRenderX,
+    currentRenderY,
+    currentRenderW,
+    currentRenderH,
+    currentRotation,
+  ]);
+
   // ========== 文本框渲染 ==========
   if (slot.type === 'text') {
     return (
@@ -659,131 +1307,169 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
           top: `${currentRenderY}%`,
           width: `${currentRenderW}%`,
           height: `${currentRenderH}%`,
+          zIndex: isMovingFrame ? 80 : (slot.zIndex !== undefined ? slot.zIndex : (zIndex !== undefined ? zIndex : 1)),
         }}
-        onClick={(e) => {
-          e.stopPropagation();
-        }}
-        onMouseDown={handleStartMoveFrame}
-        onDoubleClick={() => setIsEditingText(true)}
-        className={`absolute flex items-center justify-center select-none ${
-          isMovingFrame ? 'cursor-grabbing' : isSelected ? 'cursor-move' : 'cursor-default'
-        } ${
-          isSelected
-            ? 'z-30'
-            : 'hover:bg-neutral-100/40'
-        }`}
+        className="absolute pointer-events-none select-none"
       >
-        {/* 选中时的 8 锚点外边框 (图帮主柔和风格) */}
-        {isSelected && (
-          <div className="absolute inset-0 pointer-events-none border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.22)] z-30">
-            {/* 4 个角：柔和白色圆点 */}
-            {(['nw', 'ne', 'se', 'sw'] as ResizeHandleType[]).map((handle) => {
-              const handlePositions: Record<string, string> = {
-                nw: '-top-1 -left-1 cursor-nwse-resize',
-                ne: '-top-1 -right-1 cursor-nesw-resize',
-                se: '-bottom-1 -right-1 cursor-nwse-resize',
-                sw: '-bottom-1 -left-1 cursor-nesw-resize',
-              };
-              return (
-                <div
-                  key={handle}
-                  onMouseDown={(e) => handleStartResize(e, handle)}
-                  className={`absolute w-2.5 h-2.5 rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] pointer-events-auto z-40 ${handlePositions[handle]}`}
-                  title="拖拽改变尺寸"
-                />
-              );
-            })}
+        {/* 内层旋转主体 */}
+        <div
+          style={{
+            transform: currentRotation ? `rotate(${currentRotation}deg)` : undefined,
+            transformOrigin: 'center center',
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+          onMouseDown={handleStartMoveFrame}
+          onDoubleClick={() => setIsEditingText(true)}
+          className={`w-full h-full relative flex items-center justify-center pointer-events-auto ${
+            isMovingFrame ? 'cursor-grabbing' : isSelected ? 'cursor-move' : 'cursor-default'
+          } ${
+            isSelected
+              ? 'z-30'
+              : 'hover:bg-neutral-100/40'
+          }`}
+        >
+          {/* 选中时的 8 锚点外边框 (图帮主柔和风格) */}
+          {isSelected && (
+            <div className="absolute inset-0 pointer-events-none border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.22)] z-30">
+              {/* 米莫同款：顶部中央圆形旋转把手 (带微细连接线 + 黑色旋转弧线箭头) */}
+              <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-auto z-40">
+                <button
+                  type="button"
+                  onMouseDown={handleStartRotate}
+                  className="w-5.5 h-5.5 rounded-full bg-white border border-neutral-200/90 shadow-[0_2px_5px_rgba(0,0,0,0.18)] flex items-center justify-center cursor-grab active:cursor-grabbing hover:scale-110 active:scale-95 transition-transform text-neutral-800 hover:text-black"
+                  title="拖拽自由旋转 (靠近 0°/90°/180° 自动磁吸对齐)"
+                >
+                  <RotateCw className="w-2.5 h-2.5 stroke-[2.2]" />
+                </button>
+                {/* 连接细线 */}
+                <div className="w-[1px] h-1.5 bg-neutral-300 pointer-events-none" />
+              </div>
 
-            {/* 4 条边中点：柔和圆角胶囊条 */}
-            <div
-              onMouseDown={(e) => handleStartResize(e, 'n')}
-              className="absolute w-3.5 h-1.5 -top-[3px] left-1/2 -translate-x-1/2 rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ns-resize pointer-events-auto z-40"
-              title="上下拉伸"
-            />
-            <div
-              onMouseDown={(e) => handleStartResize(e, 's')}
-              className="absolute w-3.5 h-1.5 -bottom-[3px] left-1/2 -translate-x-1/2 rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ns-resize pointer-events-auto z-40"
-              title="上下拉伸"
-            />
-            <div
-              onMouseDown={(e) => handleStartResize(e, 'w')}
-              className="absolute w-1.5 h-3.5 top-1/2 -translate-y-1/2 -left-[3px] rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ew-resize pointer-events-auto z-40"
-              title="左右拉伸"
-            />
-            <div
-              onMouseDown={(e) => handleStartResize(e, 'e')}
-              className="absolute w-1.5 h-3.5 top-1/2 -translate-y-1/2 -right-[3px] rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ew-resize pointer-events-auto z-40"
-              title="左右拉伸"
-            />
-          </div>
-        )}
+              {/* 旋转实时角度气泡提示 (米莫同款：天蓝色徽章标签，如 -7°、90°、0°) */}
+              {rotateTooltipAngle !== null && (
+                <div className="absolute -top-7 left-[calc(50%+16px)] z-60 bg-[#3c78d8] text-white text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-[3px] shadow-md pointer-events-none whitespace-nowrap leading-none flex items-center select-none animate-fade-in tracking-tight">
+                  <span>{rotateTooltipAngle}°</span>
+                </div>
+              )}
 
-        {isEditingText ? (
-          <div className="w-full h-full p-1 flex items-center" onMouseDown={(e) => e.stopPropagation()}>
-            <input
-              type="text"
-              autoFocus
-              value={textVal}
-              placeholder={slot.placeholderText || '输入文字'}
-              onChange={(e) => setTextVal(e.target.value)}
-              onBlur={() => {
-                setIsEditingText(false);
-                onUpdateText?.(textVal);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+              {/* 4 个角：柔和白色圆点 */}
+              {(['nw', 'ne', 'se', 'sw'] as ResizeHandleType[]).map((handle) => {
+                const handlePositions: Record<string, string> = {
+                  nw: '-top-1 -left-1 cursor-nwse-resize',
+                  ne: '-top-1 -right-1 cursor-nesw-resize',
+                  se: '-bottom-1 -right-1 cursor-nwse-resize',
+                  sw: '-bottom-1 -left-1 cursor-nesw-resize',
+                };
+                return (
+                  <div
+                    key={handle}
+                    onMouseDown={(e) => handleStartResize(e, handle)}
+                    className={`absolute w-2.5 h-2.5 rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] pointer-events-auto z-40 ${handlePositions[handle]}`}
+                    title="拖拽改变尺寸"
+                  />
+                );
+              })}
+
+              {/* 4 条边中点：柔和圆角胶囊条 */}
+              <div
+                onMouseDown={(e) => handleStartResize(e, 'n')}
+                className="absolute w-3.5 h-1.5 -top-[3px] left-1/2 -translate-x-1/2 rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ns-resize pointer-events-auto z-40"
+                title="上下拉伸"
+              />
+              <div
+                onMouseDown={(e) => handleStartResize(e, 's')}
+                className="absolute w-3.5 h-1.5 -bottom-[3px] left-1/2 -translate-x-1/2 rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ns-resize pointer-events-auto z-40"
+                title="上下拉伸"
+              />
+              <div
+                onMouseDown={(e) => handleStartResize(e, 'w')}
+                className="absolute w-1.5 h-3.5 top-1/2 -translate-y-1/2 -left-[3px] rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ew-resize pointer-events-auto z-40"
+                title="左右拉伸"
+              />
+              <div
+                onMouseDown={(e) => handleStartResize(e, 'e')}
+                className="absolute w-1.5 h-3.5 top-1/2 -translate-y-1/2 -right-[3px] rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ew-resize pointer-events-auto z-40"
+                title="左右拉伸"
+              />
+            </div>
+          )}
+
+          {isEditingText ? (
+            <div className="w-full h-full p-1 flex items-center" onMouseDown={(e) => e.stopPropagation()}>
+              <input
+                type="text"
+                autoFocus
+                value={textVal}
+                placeholder={slot.placeholderText || '输入文字'}
+                onChange={(e) => setTextVal(e.target.value)}
+                onBlur={() => {
                   setIsEditingText(false);
                   onUpdateText?.(textVal);
-                }
-              }}
-              className="w-full h-full px-2 text-xs bg-white border border-[#76383d] rounded shadow-xs outline-none text-neutral-800"
-            />
-          </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center px-1">
-            {slot.text ? (
-              <span className="text-xs text-neutral-800 font-sans tracking-wide">
-                {slot.text}
-              </span>
-            ) : (
-              <div className="w-full h-full border border-neutral-300/80 bg-white/40 flex items-center justify-center px-2 py-0.5">
-                <span className="text-[11px] text-neutral-600 font-sans select-none whitespace-nowrap">
-                  {slot.placeholderText || '点两次输入文字(不输入文字不印刷)'}
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setIsEditingText(false);
+                    onUpdateText?.(textVal);
+                  }
+                }}
+                className="w-full h-full px-2 text-xs bg-white border border-[#76383d] rounded shadow-xs outline-none text-neutral-800"
+              />
+            </div>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center px-1">
+              {slot.text ? (
+                <span className="text-xs text-neutral-800 font-sans tracking-wide">
+                  {slot.text}
                 </span>
-              </div>
-            )}
-          </div>
-        )}
+              ) : (
+                <div className="w-full h-full border border-neutral-300/80 bg-white/40 flex items-center justify-center px-2 py-0.5">
+                  <span className="text-[11px] text-neutral-600 font-sans select-none whitespace-nowrap">
+                    {slot.placeholderText || '点两次输入文字(不输入文字不印刷)'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-        {/* 选中时的浮动快捷操作栏 */}
-        {isSelected && (
+        {/* 选中时的浮动快捷操作栏 (通过 createPortal 挂载到全局顶层 document.body，彻底解决被下层文字框覆盖的问题) */}
+        {isSelected && !isRotating && toolbarPos && typeof document !== 'undefined' && createPortal(
           <div
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-white text-neutral-700 shadow-md border border-[#dadce0] rounded px-2 py-0.5 flex items-center space-x-1.5 z-40 text-xs"
+            style={{
+              position: 'fixed',
+              left: `${toolbarPos.left}px`,
+              top: `${toolbarPos.top}px`,
+              transform: toolbarPos.placeAbove ? 'translate(-50%, -100%)' : 'translateX(-50%)',
+            }}
+            className="bg-white/98 text-neutral-700 shadow-2xl border border-[#dadce0] rounded-xl px-3 py-1.5 flex items-center space-x-2 z-[9999] text-xs pointer-events-auto whitespace-nowrap animate-fade-in"
           >
             <button
               onClick={() => setIsEditingText(true)}
-              className="p-1 hover:bg-[#faf4f5] hover:text-[#76383d] rounded cursor-pointer"
+              className="px-2.5 py-1.5 hover:bg-[#faf4f5] hover:text-[#76383d] rounded-lg cursor-pointer text-xs font-semibold"
               title="编辑文字"
             >
               编辑
             </button>
             <button
               onClick={onDuplicateSlot}
-              className="p-1 hover:bg-[#faf4f5] hover:text-[#76383d] rounded cursor-pointer"
+              className="w-8 h-8 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] rounded-lg cursor-pointer text-neutral-600 active:scale-95"
               title="复制此文本框"
             >
-              <Copy className="w-3 h-3" />
+              <Copy className="w-4 h-4" />
             </button>
             <button
               onClick={onDeleteSlot}
-              className="p-1 hover:bg-[#faf4f5] hover:text-[#76383d] rounded cursor-pointer"
+              className="w-8 h-8 flex items-center justify-center hover:bg-rose-50 hover:text-rose-600 rounded-lg cursor-pointer text-neutral-600 active:scale-95"
               title="删除此文本框"
             >
-              <Trash2 className="w-3 h-3" />
+              <Trash2 className="w-4 h-4" />
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     );
@@ -799,25 +1485,52 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
         top: `${currentRenderY}%`,
         width: `${currentRenderW}%`,
         height: `${currentRenderH}%`,
-        zIndex: isMovingFrame ? 45 : (isSelected && !hasMultipleSelection ? 30 : (zIndex !== undefined ? zIndex : 1)),
+        zIndex: isMovingFrame ? 80 : (slot.zIndex !== undefined ? slot.zIndex : (zIndex !== undefined ? zIndex : 1)),
       }}
-      onClick={(e) => {
-        e.stopPropagation();
-      }}
-      onMouseDown={handleStartMoveFrame}
-      onDoubleClick={() => photo && setIsEditingCrop(!isEditingCrop)}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragOver(true);
-      }}
-      onDragLeave={() => setIsDragOver(false)}
-      onDrop={handleDrop}
-      className={`absolute group bg-[#e2e3e5] select-none ${
-        isMovingFrame ? 'cursor-grabbing shadow-lg' : isSelected ? 'cursor-move' : 'cursor-default'
-      } ${
-        !isSelected && !isMultiSelected ? 'hover:outline hover:outline-1 hover:outline-neutral-400' : ''
-      }`}
+      className="absolute pointer-events-none select-none"
     >
+      {/* 内层旋转主体 (画框本体 + 8 锚点 + 顶部旋转手柄) */}
+      <div
+        style={{
+          transform: currentRotation ? `rotate(${currentRotation}deg)` : undefined,
+          transformOrigin: 'center center',
+          opacity: slot.opacity !== undefined ? slot.opacity : 1,
+          boxShadow: slot.hasShadow
+            ? '0 12px 28px -4px rgba(0, 0, 0, 0.28), 0 4px 10px -2px rgba(0, 0, 0, 0.12)'
+            : undefined,
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+        onMouseDown={handleStartMoveFrame}
+        onDoubleClick={handleDoubleClickPhoto}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDragOver(true);
+        }}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={handleDrop}
+        className={`w-full h-full relative group bg-[#e2e3e5] pointer-events-auto ${
+          isSwapTargetHovered
+            ? 'shadow-md z-40'
+            : isMovingFrame
+            ? 'cursor-grabbing shadow-lg'
+            : isSelected
+            ? 'cursor-move'
+            : 'cursor-default'
+        } ${
+          !isSelected && !isMultiSelected && !isSwapTargetHovered ? 'hover:outline hover:outline-1 hover:outline-neutral-400' : ''
+        }`}
+      >
+      {/* 拖拽互换照片目标悬停高亮提示层 (轻巧 1.5px 优雅细框 + 微透薄纱 + 紧凑精致微徽章) */}
+      {isSwapTargetHovered && (
+        <div className="absolute inset-0 bg-[#76383d]/8 backdrop-blur-[0.5px] z-50 flex items-center justify-center pointer-events-none animate-fade-in border border-[#76383d] shadow-[inset_0_0_0_1px_rgba(118,56,61,0.25)]">
+          <div className="bg-[#76383d]/95 text-white px-2.5 py-1 rounded-full shadow-md flex items-center space-x-1 text-[11px] font-normal border border-white/25">
+            <ArrowLeftRight className="w-3 h-3 stroke-[2.2]" />
+            <span className="leading-none tracking-tight">松开对调照片</span>
+          </div>
+        </div>
+      )}
       {/* 实时动态像素尺寸标注标签 (仅在未填充照片时显示，或在拉伸调整边框尺寸时提示) */}
       {(!photo || !!activeResizeHandle) && (
         <div className="absolute top-1.5 left-1.5 z-10 text-[9px] font-sans text-white/90 select-none pointer-events-none drop-shadow-xs leading-none tracking-tight">
@@ -825,65 +1538,86 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
         </div>
       )}
 
-      {/* 照片渲染或占位图 */}
-      <div className="w-full h-full relative overflow-hidden">
+      {/* 照片渲染或占位图 (应用圆角、边框、遮罩) */}
+      <div
+        style={{
+          borderRadius:
+            slot.maskShape && slot.maskShape !== 'none'
+              ? undefined
+              : slot.borderRadius
+              ? `${slot.borderRadius}px`
+              : undefined,
+          border:
+            slot.borderWidth && slot.borderWidth > 0
+              ? `${slot.borderWidth}px solid ${slot.borderColor || '#ffffff'}`
+              : undefined,
+          ...getMaskStyle(slot.maskShape),
+        }}
+        className="w-full h-full relative overflow-hidden"
+      >
         {photo ? (
           <div
-            className={`w-full h-full relative overflow-hidden flex items-center justify-center ${
-              isEditingCrop ? 'cursor-grab active:cursor-grabbing' : ''
-            }`}
-            onMouseDown={isEditingCrop ? handleStartPan : undefined}
+            className="w-full h-full relative overflow-hidden flex items-center justify-center"
           >
-            <div
-              className={`w-full h-full relative overflow-hidden flex items-center justify-center ${
-                isPanning ? 'transition-none' : 'transition-transform duration-75'
-              }`}
-              style={{
-                transform: `scale(${crop.scale}) rotate(${crop.rotation}deg)`,
-              }}
-            >
-              <img
-                src={photo.url}
-                alt={photo.name}
-                referrerPolicy="no-referrer"
-                style={{
-                  objectPosition: `${crop.x}% ${crop.y}%`,
-                  transform: `translate(${(50 - crop.x) * (crop.scale - 1) * 0.5}%, ${(50 - crop.y) * (crop.scale - 1) * 0.5}%)`,
-                }}
-                className="w-full h-full object-cover select-none pointer-events-none"
-              />
-            </div>
-
-            {/* 1:1 米莫印品：当照片尺寸大于画框（存在裁剪溢出或缩放）时，居中常驻显示圆形小手图标徽章，可直接按住平移照片 */}
-            {isPhotoOverflowing && (
-              <div
-                onMouseDown={handleStartPan}
-                onClick={(e) => e.stopPropagation()}
-                className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 transition-all select-none ${
-                  isSelected || isEditingCrop || isPanning
-                    ? 'opacity-100 scale-100 pointer-events-auto'
-                    : 'opacity-0 group-hover:opacity-90 scale-95 hover:scale-100 pointer-events-auto'
-                }`}
-                title="按住拖拽调整照片在画框中的位置 (亦可直接滚动滚轮缩放)"
-              >
+            {(() => {
+              const pageW_mm = bookSpec?.widthMm || 200;
+              const pageH_mm = bookSpec?.heightMm || 200;
+              const frameAspect = Math.max(0.01, (currentRenderW * pageW_mm) / Math.max(0.01, currentRenderH * pageH_mm));
+              const isRotated90 = Math.abs((crop.rotation || 0) % 180) === 90;
+              return (
                 <div
-                  className={`w-9 h-9 rounded-full bg-white/95 border border-[#333333] shadow-sm flex items-center justify-center transition-all ${
-                    isPanning
-                      ? 'cursor-grabbing scale-110 bg-white ring-2 ring-[#76383d]/40 shadow-md'
-                      : 'cursor-grab hover:scale-105 hover:bg-white active:scale-95'
-                  }`}
+                  className="relative overflow-hidden flex items-center justify-center transition-none"
+                  style={{
+                    width: isRotated90 ? `${(1 / frameAspect) * 100}%` : '100%',
+                    height: isRotated90 ? `${frameAspect * 100}%` : '100%',
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: `translate(-50%, -50%) rotate(${crop.rotation || 0}deg) scale(${activeScale}) ${slot.flipH ? 'scaleX(-1)' : ''}`,
+                  }}
                 >
-                  <IconMemoHand isGrabbing={isPanning} />
+                  <img
+                    src={photo.previewUrl || photo.thumbnailUrl || photo.thumbUrl || photo.url}
+                    alt={photo.name}
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    style={{
+                      objectPosition: slot.fitMode === 'contain' ? 'center' : `${crop.x}% ${crop.y}%`,
+                      transform:
+                        slot.fitMode === 'contain'
+                          ? undefined
+                          : `translate(${(50 - crop.x) * (activeScale - 1) * 0.5}%, ${(50 - crop.y) * (activeScale - 1) * 0.5}%)`,
+                    }}
+                    className={`w-full h-full ${
+                      slot.fitMode === 'contain' ? 'object-contain' : 'object-cover'
+                    } select-none pointer-events-none`}
+                  />
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
-            {/* 裁剪平移中半透明指示 */}
-            {isEditingCrop && (
-              <div className="absolute inset-0 border-2 border-dashed border-[#76383d] pointer-events-none bg-[#76383d]/10 flex items-center justify-center">
-                <div className="bg-black/75 text-white text-[10px] px-2 py-1 rounded backdrop-blur-xs flex items-center space-x-1 shadow-md">
-                  <Move className="w-3 h-3" />
-                  <span>按住平移照片 · 双击完成</span>
+            {/* 居中裁剪/平移微调锚点：默认隐藏，当鼠标移到画面中心区域时精致浮现，按住即平移，松手即完成 */}
+            {isPhotoOverflowing && slot.fitMode !== 'contain' && (
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 group/center-pan flex items-center justify-center pointer-events-auto z-20">
+                <div
+                  onMouseDown={handleStartPan}
+                  onClick={(e) => e.stopPropagation()}
+                  className={`transition-all select-none duration-150 ${
+                    isPanning
+                      ? 'opacity-100 scale-100 pointer-events-auto'
+                      : 'opacity-0 group-hover/center-pan:opacity-100 scale-90 group-hover/center-pan:scale-100 pointer-events-none group-hover/center-pan:pointer-events-auto'
+                  }`}
+                  title="按住直接平移调整照片构图 (松手即保存，滚动滚轮可缩放)"
+                >
+                  <div
+                    className={`w-6.5 h-6.5 rounded-full bg-white/80 backdrop-blur-[2px] text-neutral-800 border border-white/60 shadow-[0_2px_6px_rgba(0,0,0,0.14),0_0_0_1px_rgba(0,0,0,0.06)] flex items-center justify-center transition-all ${
+                      isPanning
+                        ? 'cursor-grabbing scale-110 ring-2 ring-[#76383d]/50 bg-white/95 shadow-[0_4px_16px_rgba(0,0,0,0.3)] text-[#76383d]'
+                        : 'cursor-grab hover:bg-white/95 hover:scale-105 hover:shadow-[0_3px_10px_rgba(0,0,0,0.2)] active:scale-95'
+                    }`}
+                  >
+                    <IconMoveCross className="w-[15px] h-[15px] select-none pointer-events-none text-neutral-700" />
+                  </div>
                 </div>
               </div>
             )}
@@ -907,9 +1641,7 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                {/* 饱满温润相机轮廓 (低趴平缓军舰部，告别高耸快门键，大圆角平滑过渡) */}
                 <path d="M8.2 6.8L9.5 4.8C9.8 4.3 10.4 4 11 4H13C13.6 4 14.2 4.3 14.5 4.8L15.8 6.8H18.8C20 6.8 21 7.8 21 9V17.5C21 18.9 20 20 18.8 20H5.2C4 20 3 18.9 3 17.5V9C3 7.8 4 6.8 5.2 6.8H8.2Z" />
-                {/* 镜头正圆：正中黄金落点 (cx: 12, cy: 13.5)，半径 3.3，内外留白匀称 */}
                 <circle cx="12" cy="13.5" r="3.3" />
               </svg>
               <span
@@ -941,11 +1673,9 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
             <IconWarningTriangle isSevere={resolutionStatus.isSevere} />
           </div>
 
-          {/* 悬停浮现的极简精致提示气泡 (向左侧展开，绝不遮挡底部工具栏) */}
           <div
             className="absolute right-full mr-2 bottom-0 w-max max-w-[220px] px-2.5 py-1.5 bg-neutral-900/95 text-white rounded-md shadow-xl text-[11px] leading-snug opacity-0 invisible group-hover/dpi:opacity-100 group-hover/dpi:visible transition-all duration-150 pointer-events-none z-[120] backdrop-blur-md border border-neutral-700/60"
           >
-            {/* 指向警告图标的小三角尖角 */}
             <div className="absolute -right-1 bottom-1.5 w-2 h-2 bg-neutral-900/95 border-t border-r border-neutral-700/60 rotate-45 pointer-events-none" />
 
             <div className="flex items-start space-x-1.5">
@@ -966,7 +1696,7 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
         </div>
       )}
 
-      {/* ========== 选中画框时的 8 个调整尺寸手柄 + 底部旋转手柄 + 蓝色毫米尺寸/坐标浮动标签 (图帮主柔和风格) ========== */}
+      {/* ========== 选中画框时的 8 个调整尺寸手柄 + 顶部旋转手柄 + 蓝色毫米尺寸/坐标浮动标签 ========== */}
       {isSelected && !hasMultipleSelection && (
         <>
           {/* 柔和天蓝色毫米微型浮动标签 (#3c78d8) */}
@@ -1004,9 +1734,52 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
             </div>
           )}
 
-          {/* 图帮主同款：选框外边框 (纯白发光细线，四角圆点 + 四边胶囊条 + 底部旋转手柄) */}
+          {/* 选框外边框 (纯白发光细线，四角圆点 + 四边胶囊条 + 顶部旋转手柄) */}
           <div className="absolute inset-0 pointer-events-none border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.22)] z-30">
-            {/* 4 个角：柔和白色圆点 */}
+            {photo && (
+              <div className="absolute top-0 left-0 w-14 h-14 group/corner-zone pointer-events-auto z-40">
+                <div
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    onStartSwapDrag?.(e);
+                  }}
+                  className="absolute top-3 left-3 w-6 h-6 rounded-full bg-white/75 backdrop-blur-[2px] text-neutral-800 shadow-[0_2px_6px_rgba(0,0,0,0.14),0_0_0_1px_rgba(0,0,0,0.06)] border border-white/60 flex items-center justify-center cursor-grab active:cursor-grabbing hover:bg-white/95 hover:scale-110 active:scale-95 opacity-0 group-hover/corner-zone:opacity-100 transition-all duration-150 group/swap-btn pointer-events-none group-hover/corner-zone:pointer-events-auto"
+                  title="按住拖拽至其他相框互换"
+                >
+                  <IconHorizontalSwapArrows className="w-3.5 h-3.5 pointer-events-none text-neutral-700" />
+
+                  {/* 悬停微型提示气泡：置于图标右侧向内展示，杜绝溢出画框边缘遮挡 */}
+                  <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 pointer-events-none opacity-0 group-hover/swap-btn:opacity-100 transition-all duration-150 z-50 whitespace-nowrap">
+                    <div className="relative bg-neutral-900/90 text-white text-[10px] font-normal px-2 py-0.5 rounded shadow-md border border-neutral-700/50 flex items-center select-none tracking-normal">
+                      拖拽互换
+                      <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-1.5 h-1.5 bg-neutral-900/90 border-b border-l border-neutral-700/50 rotate-45 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 顶部中央圆形旋转把手 */}
+            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-auto z-40">
+              <button
+                type="button"
+                onMouseDown={handleStartRotate}
+                className="w-5.5 h-5.5 rounded-full bg-white border border-neutral-200/90 shadow-[0_2px_5px_rgba(0,0,0,0.18)] flex items-center justify-center cursor-grab active:cursor-grabbing hover:scale-110 active:scale-95 transition-transform text-neutral-500 hover:text-neutral-700"
+                title="拖拽自由旋转画框 (靠近 0°/90°/180° 自动磁吸对齐)"
+              >
+                <RotateCw className="w-3 h-3 stroke-[2]" />
+              </button>
+              <div className="w-[1px] h-1.5 bg-neutral-300 pointer-events-none" />
+            </div>
+
+            {/* 旋转实时角度气泡提示 */}
+            {rotateTooltipAngle !== null && (
+              <div className="absolute -top-7 left-[calc(50%+16px)] z-60 bg-[#3c78d8] text-white text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-[3px] shadow-md pointer-events-none whitespace-nowrap leading-none flex items-center select-none animate-fade-in tracking-tight">
+                <span>{rotateTooltipAngle}°</span>
+              </div>
+            )}
+
+            {/* 4 个角手柄 */}
             {(['nw', 'ne', 'se', 'sw'] as ResizeHandleType[]).map((handle) => {
               const handlePositions: Record<string, string> = {
                 nw: '-top-1 -left-1 cursor-nwse-resize',
@@ -1019,12 +1792,12 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
                   key={handle}
                   onMouseDown={(e) => handleStartResize(e, handle)}
                   className={`absolute w-2.5 h-2.5 rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] pointer-events-auto z-40 ${handlePositions[handle]}`}
-                  title="拖拽改变画框尺寸"
+                  title="拖拽等比例放大或缩小画框 (按住 Shift 可自由拉伸)"
                 />
               );
             })}
 
-            {/* 4 条边中点：柔和圆角胶囊条 (长 14px，高 5px) */}
+            {/* 4 条边中点手柄 */}
             <div
               onMouseDown={(e) => handleStartResize(e, 'n')}
               className="absolute w-3.5 h-1.5 -top-[3px] left-1/2 -translate-x-1/2 rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ns-resize pointer-events-auto z-40"
@@ -1045,106 +1818,359 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
               className="absolute w-1.5 h-3.5 top-1/2 -translate-y-1/2 -right-[3px] rounded-full bg-white border border-neutral-300 shadow-[0_1px_3px_rgba(0,0,0,0.22)] cursor-ew-resize pointer-events-auto z-40"
               title="左右拉伸"
             />
-
-            {/* 图帮主同款：底部中央圆形旋转把手 (带微小悬空与蓝色旋转弧线箭头) */}
-            <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-auto z-40">
-              <button
-                type="button"
-                onClick={handleRotate}
-                className="w-5 h-5 rounded-full bg-white border border-neutral-200/90 shadow-[0_2px_5px_rgba(0,0,0,0.18)] flex items-center justify-center cursor-pointer hover:scale-110 active:scale-95 transition-transform text-[#3c78d8]"
-                title="顺时针旋转 90°"
-              >
-                <RotateCw className="w-2.5 h-2.5 stroke-[2.2]" />
-              </button>
-            </div>
           </div>
         </>
       )}
+      </div>
 
-      {/* ========== 选中画框时的浮动快捷工具栏 (仅在单选时显示，置于旋转按钮下方) ========== */}
-      {isSelected && !hasMultipleSelection && (
+      {/* ========== 全新设计的照片快速操作浮动条 (Photo Quick Action Bar 舒适大尺寸版，通过 createPortal 挂载到全局顶层 document.body，彻底解决被文字框或兄弟图层遮挡的问题) ========== */}
+      {isSelected && !hasMultipleSelection && !isRotating && toolbarPos && typeof document !== 'undefined' && createPortal(
         <div
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
-          className="absolute -bottom-16 left-1/2 -translate-x-1/2 bg-white text-neutral-700 shadow-md border border-[#dadce0] rounded px-2 py-1 flex items-center space-x-1.5 z-40 backdrop-blur-xs whitespace-nowrap text-xs animate-fade-in"
+          style={{
+            position: 'fixed',
+            left: `${toolbarPos.left}px`,
+            top: `${toolbarPos.top}px`,
+            transform: toolbarPos.placeAbove ? 'translate(-50%, -100%)' : 'translateX(-50%)',
+          }}
+          className="bg-white/98 text-neutral-700 shadow-2xl border border-[#dadce0] rounded-2xl px-3 py-2 flex items-center space-x-2 z-[9999] backdrop-blur-md whitespace-nowrap text-sm animate-fade-in pointer-events-auto"
         >
+          {/* 【第 1 组：构图与方向】 */}
           {photo && (
             <>
-              <button
-                onClick={handleRotate}
-                className="p-1 hover:bg-[#faf4f5] hover:text-[#76383d] rounded cursor-pointer"
-                title="顺时针旋转 90°"
-              >
-                <RotateCw className="w-3.5 h-3.5" />
-              </button>
-
-              <div className="flex items-center space-x-1">
+              {/* 1. 缩小与放大按钮组 */}
+              <div className="flex items-center space-x-1 bg-neutral-100/90 rounded-xl p-1 border border-neutral-200/80">
                 <button
                   onClick={() => handleScaleChange(crop.scale - 0.1)}
-                  className="p-0.5 hover:bg-[#faf4f5] rounded cursor-pointer"
-                  title="缩小"
+                  className="w-8.5 h-8.5 flex items-center justify-center hover:bg-white hover:text-[#76383d] text-neutral-700 rounded-lg cursor-pointer transition-colors active:scale-95"
+                  title="缩小照片"
                 >
-                  <ZoomOut className="w-3 h-3" />
+                  <ZoomOut className="w-5 h-5 stroke-[2]" />
                 </button>
-                <input
-                  type="range"
-                  min="1.0"
-                  max="3.0"
-                  step="0.05"
-                  value={crop.scale}
-                  onChange={(e) => handleScaleChange(Number(e.target.value))}
-                  className="w-12 h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-[#76383d]"
-                />
                 <button
                   onClick={() => handleScaleChange(crop.scale + 0.1)}
-                  className="p-0.5 hover:bg-[#faf4f5] rounded cursor-pointer"
-                  title="放大"
+                  className="w-8.5 h-8.5 flex items-center justify-center hover:bg-white hover:text-[#76383d] text-neutral-700 rounded-lg cursor-pointer transition-colors active:scale-95"
+                  title="放大照片"
                 >
-                  <ZoomIn className="w-3 h-3" />
+                  <ZoomIn className="w-5 h-5 stroke-[2]" />
                 </button>
-                <span className="text-[10px] font-mono text-neutral-500 w-8 text-right select-none">
-                  {Math.round((crop.scale || 1.0) * 100)}%
-                </span>
               </div>
 
-              <div className="w-[1px] h-3 bg-neutral-200" />
-
+              {/* 2. 图片适应照片框功能 */}
               <button
-                onClick={() => setIsEditingCrop(!isEditingCrop)}
-                className={`p-1 rounded cursor-pointer ${
-                  isEditingCrop ? 'bg-[#faf4f5] text-[#76383d]' : 'hover:bg-[#faf4f5] hover:text-[#76383d]'
+                onClick={handleFitFrameToPhoto}
+                className="w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 active:scale-95"
+                title="适应框 (使画框外框与照片双向 100% 贴合，无裁切且无白边)"
+              >
+                <IconFitFrame className="w-5.5 h-5.5" />
+              </button>
+
+              {/* 3. 照片框内顺时针旋转 90° */}
+              <button
+                onClick={handleRotate}
+                className="w-9 h-9 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-xl cursor-pointer transition-colors active:scale-95"
+                title="框内顺时针旋转 90°"
+              >
+                <RotateCw className="w-5 h-5 stroke-[2]" />
+              </button>
+
+              {/* 4. 水平镜像翻转 */}
+              <button
+                onClick={() => onUpdateSlotProps?.({ flipH: !slot.flipH })}
+                className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors active:scale-95 ${
+                  slot.flipH
+                    ? 'bg-[#faf4f5] text-[#76383d] ring-1.5 ring-[#76383d]'
+                    : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
                 }`}
-                title="调整画面重心"
+                title={slot.flipH ? '水平翻转 (当前已翻转，点击恢复正常)' : '水平翻转 (左右镜像)'}
               >
-                <Move className="w-3.5 h-3.5" />
+                <IconFlipHorizontalMomo className="w-5.5 h-5.5" />
               </button>
 
-              <button
-                onClick={onClearPhoto}
-                className="p-1 hover:bg-[#faf4f5] text-neutral-500 hover:text-[#76383d] rounded cursor-pointer"
-                title="清除照片 (保留画框)"
-              >
-                <ImageIcon className="w-3.5 h-3.5" />
-              </button>
+              {/* 分割线 */}
+              <div className="w-[1px] h-5 bg-neutral-200 shrink-0" />
             </>
           )}
 
+          {/* 【第 2 组：满屏与构图】 */}
+          {/* 5. 照片在整个页面满屏功能 */}
           <button
-            onClick={onDuplicateSlot}
-            className="p-1 hover:bg-[#faf4f5] hover:text-[#76383d] rounded cursor-pointer"
-            title="复制此画框"
+            onClick={handleMakeFullScreenClick}
+            className="w-9 h-9 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-xl cursor-pointer transition-colors active:scale-95"
+            title="一键满屏 (将照片铺满当前整页)"
           >
-            <Copy className="w-3.5 h-3.5" />
+            <IconFullScreenMomo className="w-5.5 h-5.5" />
           </button>
 
-          <button
-            onClick={onDeleteSlot}
-            className="p-1 hover:bg-[#faf4f5] text-neutral-500 hover:text-[#76383d] rounded cursor-pointer"
-            title="删除画框"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+          {/* 分割线 */}
+          <div className="w-[1px] h-5 bg-neutral-200 shrink-0" />
+
+          {/* 【第 3 组：遮罩与样式装饰】 */}
+          {/* 7. 遮罩功能 (异形照片框) */}
+          <div className="relative">
+            <button
+              onClick={() => setActivePopover((prev) => (prev === 'mask' ? null : 'mask'))}
+              className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors ${
+                activePopover === 'mask' || (slot.maskShape && slot.maskShape !== 'none')
+                  ? 'bg-[#faf4f5] text-[#76383d] font-medium border border-[#ebdbe0]'
+                  : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
+              }`}
+              title="遮罩功能 (异形照片框)"
+            >
+              <Shapes className="w-5 h-5 stroke-[2]" />
+            </button>
+
+            {/* 遮罩气泡弹窗 */}
+            {activePopover === 'mask' && (
+              <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 p-3 z-[10000] w-56 animate-fade-in text-neutral-800">
+                <div className="flex items-center justify-between pb-2 border-b border-neutral-100 mb-2">
+                  <span className="font-semibold text-xs text-neutral-800">异形照片框遮罩</span>
+                  <button
+                    onClick={() => setActivePopover(null)}
+                    className="text-neutral-400 hover:text-neutral-600 text-xs cursor-pointer p-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {PRESET_MASKS.map((m) => {
+                    const isCurrent = (slot.maskShape || 'none') === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          onUpdateSlotProps?.({ maskShape: m.id });
+                        }}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all cursor-pointer ${
+                          isCurrent
+                            ? 'bg-[#faf4f5] border-[#76383d] text-[#76383d] font-bold ring-1 ring-[#76383d]'
+                            : 'hover:bg-neutral-50 border-neutral-200 text-neutral-700'
+                        }`}
+                      >
+                        <span className="text-base leading-none mb-1">{m.icon}</span>
+                        <span className="text-[10px] leading-none truncate max-w-full">{m.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 8. 照片描边功能与描边颜色 */}
+          <div className="relative">
+            <button
+              onClick={() => setActivePopover((prev) => (prev === 'border' ? null : 'border'))}
+              className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors ${
+                activePopover === 'border' || (slot.borderWidth && slot.borderWidth > 0)
+                  ? 'bg-[#faf4f5] text-[#76383d] font-medium border border-[#ebdbe0]'
+                  : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
+              }`}
+              title="照片描边与颜色"
+            >
+              <Square className="w-5 h-5 stroke-[2]" />
+            </button>
+
+            {/* 描边气泡弹窗 */}
+            {activePopover === 'border' && (
+              <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 p-3.5 z-[10000] w-60 animate-fade-in text-neutral-800 space-y-3">
+                <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
+                  <span className="font-semibold text-xs text-neutral-800">照片描边与颜色</span>
+                  <button
+                    onClick={() => setActivePopover(null)}
+                    className="text-neutral-400 hover:text-neutral-600 text-xs cursor-pointer p-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* 粗细选择 */}
+                <div>
+                  <label className="text-[11px] text-neutral-500 font-medium block mb-1.5">
+                    描边粗细: {slot.borderWidth || 0}px
+                  </label>
+                  <div className="flex items-center space-x-1">
+                    {[0, 1, 2, 4, 8, 12].map((w) => (
+                      <button
+                        key={w}
+                        onClick={() => onUpdateSlotProps?.({ borderWidth: w })}
+                        className={`flex-1 py-1 text-[11px] rounded border transition-colors cursor-pointer ${
+                          (slot.borderWidth || 0) === w
+                            ? 'bg-[#76383d] text-white border-[#76383d] font-semibold'
+                            : 'hover:bg-neutral-50 border-neutral-200 text-neutral-700'
+                        }`}
+                      >
+                        {w === 0 ? '无' : `${w}px`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 颜色选择 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] text-neutral-500 font-medium">描边颜色</label>
+                    <input
+                      type="color"
+                      value={slot.borderColor || '#ffffff'}
+                      onChange={(e) => onUpdateSlotProps?.({ borderColor: e.target.value })}
+                      className="w-5.5 h-5.5 rounded cursor-pointer border border-neutral-300 p-0"
+                      title="自定义拾色"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {PRESET_BORDER_COLORS.map((c) => (
+                      <button
+                        key={c.value}
+                        onClick={() => onUpdateSlotProps?.({ borderColor: c.value })}
+                        className="flex items-center space-x-1 p-1 rounded border border-neutral-200 hover:border-neutral-400 transition-all cursor-pointer text-left"
+                      >
+                        <span
+                          className="w-3.5 h-3.5 rounded-full border border-neutral-300 shrink-0 shadow-2xs"
+                          style={{ backgroundColor: c.value }}
+                        />
+                        <span className="text-[9px] text-neutral-600 truncate">{c.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 9. 照片特效功能 (倒圆角、不透明度、阴影) */}
+          <div className="relative">
+            <button
+              onClick={() => setActivePopover((prev) => (prev === 'effects' ? null : 'effects'))}
+              className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors ${
+                activePopover === 'effects' ||
+                (slot.borderRadius && slot.borderRadius > 0) ||
+                slot.hasShadow ||
+                (slot.opacity !== undefined && slot.opacity < 1)
+                  ? 'bg-[#faf4f5] text-[#76383d] font-medium border border-[#ebdbe0]'
+                  : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
+              }`}
+              title="照片特效 (倒圆角、不透明度、阴影)"
+            >
+              <Sparkles className="w-5 h-5 stroke-[2]" />
+            </button>
+
+            {/* 特效气泡弹窗 */}
+            {activePopover === 'effects' && (
+              <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 p-3.5 z-[10000] w-64 animate-fade-in text-neutral-800 space-y-3.5">
+                <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
+                  <span className="font-semibold text-xs text-neutral-800">倒圆角 & 阴影 & 透明度</span>
+                  <button
+                    onClick={() => setActivePopover(null)}
+                    className="text-neutral-400 hover:text-neutral-600 text-xs cursor-pointer p-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* 倒圆角 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] text-neutral-600 font-medium">倒圆角半径</label>
+                    <span className="text-[10px] font-mono text-neutral-500 font-medium">
+                      {slot.borderRadius || 0}px
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="40"
+                    step="2"
+                    value={slot.borderRadius || 0}
+                    onChange={(e) => onUpdateSlotProps?.({ borderRadius: Number(e.target.value) })}
+                    className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-[#76383d]"
+                  />
+                  <div className="flex items-center space-x-1 mt-1.5">
+                    {[
+                      { name: '直角', val: 0 },
+                      { name: '微圆', val: 6 },
+                      { name: '圆角', val: 14 },
+                      { name: '大圆', val: 24 },
+                    ].map((r) => (
+                      <button
+                        key={r.val}
+                        onClick={() => onUpdateSlotProps?.({ borderRadius: r.val })}
+                        className={`flex-1 py-0.5 text-[10px] rounded border transition-colors cursor-pointer ${
+                          (slot.borderRadius || 0) === r.val
+                            ? 'bg-[#76383d] text-white border-[#76383d] font-semibold'
+                            : 'hover:bg-neutral-50 border-neutral-200 text-neutral-600'
+                        }`}
+                      >
+                        {r.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 不透明度 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] text-neutral-600 font-medium">不透明度</label>
+                    <span className="text-[10px] font-mono text-neutral-500 font-medium">
+                      {Math.round((slot.opacity !== undefined ? slot.opacity : 1) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={slot.opacity !== undefined ? slot.opacity : 1}
+                    onChange={(e) => onUpdateSlotProps?.({ opacity: Number(e.target.value) })}
+                    className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-[#76383d]"
+                  />
+                </div>
+
+                {/* 投影开关 */}
+                <div className="pt-1 flex items-center justify-between border-t border-neutral-100">
+                  <span className="text-[11px] text-neutral-700 font-medium">相框自然投影</span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!slot.hasShadow}
+                      onChange={(e) => onUpdateSlotProps?.({ hasShadow: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-8 h-4.5 bg-neutral-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-[#76383d]"></div>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 分割线 */}
+          <div className="w-[1px] h-5 bg-neutral-200 shrink-0" />
+
+          {/* 【第 4 组：管理与资产】 */}
+          {/* 查找照片功能 */}
+          {photo && (
+            <button
+              onClick={() => onLocatePhoto?.(photo.id)}
+              className="w-9 h-9 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-xl cursor-pointer transition-colors"
+              title="在左侧照片库中查找并高亮此照片"
+            >
+              <Search className="w-5 h-5 stroke-[2]" />
+            </button>
+          )}
+
+          {/* 框内删除照片功能 (清除照片保留画框) */}
+          {photo && (
+            <button
+              onClick={onClearPhoto}
+              className="w-9 h-9 flex items-center justify-center hover:bg-rose-50 text-neutral-500 hover:text-rose-600 rounded-xl cursor-pointer transition-colors"
+              title="框内清空照片 (保留画框位置与尺寸)"
+            >
+              <Trash2 className="w-5 h-5 stroke-[2]" />
+            </button>
+          )}
+        </div>,
+        document.body
       )}
     </div>
   );
