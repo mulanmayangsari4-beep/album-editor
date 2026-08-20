@@ -44,6 +44,10 @@ import {
   GuideLine,
   SpacingGap,
 } from '../utils/snapEngine';
+import {
+  MOMO_MASK_DEFINITIONS,
+  getMomoMaskStyle,
+} from '../utils/masks';
 
 // 1:1 精准复刻：舒展四向实心移动箭头 (长十字柄 + 锐利分离箭头，绝不粘连挤压)
 const IconMoveCross: React.FC<{ className?: string }> = ({ className = 'w-4.5 h-4.5' }) => (
@@ -151,33 +155,344 @@ const IconFullScreenMomo: React.FC<{ className?: string }> = ({ className = 'w-4
   </svg>
 );
 
-// 异形遮罩计算样式
-const getMaskStyle = (maskShape?: string): React.CSSProperties => {
-  if (!maskShape || maskShape === 'none') return {};
-  switch (maskShape) {
-    case 'circle':
-      return { clipPath: 'circle(50% at 50% 50%)' };
-    case 'heart':
-      return {
-        clipPath:
-          'polygon(50% 15%, 62% 0%, 82% 0%, 100% 18%, 100% 40%, 50% 95%, 0% 40%, 0% 18%, 18% 0%, 38% 0%)',
-      };
-    case 'star':
-      return {
-        clipPath:
-          'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
-      };
-    case 'diamond':
-      return { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' };
-    case 'triangle':
-      return { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' };
-    case 'hexagon':
-      return { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' };
-    case 'arch':
-      return { borderRadius: '1000px 1000px 0 0' };
-    default:
-      return {};
+// 米莫风格遮罩图标 (外层细线圆角方形框 + 内层圆形 + 圆内 45° 精致细密网纹排线，无十字锚点)
+const IconMaskMomo: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    {/* 外层细线圆角方形框 */}
+    <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" />
+    {/* 中间正圆 */}
+    <circle cx="12" cy="12" r="5.2" stroke="currentColor" strokeWidth="1.2" />
+    {/* 圆内 45° 交叉细密网纹 (裁剪在圆内，精细 0.75px 线条) */}
+    <g clipPath="url(#momo-icon-mask-clip)">
+      <line x1="6.5" y1="9" x2="15" y2="17.5" stroke="currentColor" strokeWidth="0.75" />
+      <line x1="8" y1="7" x2="17" y2="16" stroke="currentColor" strokeWidth="0.75" />
+      <line x1="10" y1="6.5" x2="17.5" y2="14" stroke="currentColor" strokeWidth="0.75" />
+      <line x1="6.5" y1="12" x2="12" y2="17.5" stroke="currentColor" strokeWidth="0.75" />
+      <line x1="12" y1="6.5" x2="17.5" y2="12" stroke="currentColor" strokeWidth="0.75" />
+
+      <line x1="15" y1="6.5" x2="6.5" y2="15" stroke="currentColor" strokeWidth="0.75" />
+      <line x1="17" y1="8" x2="7" y2="18" stroke="currentColor" strokeWidth="0.75" />
+      <line x1="17.5" y1="10" x2="10" y2="17.5" stroke="currentColor" strokeWidth="0.75" />
+      <line x1="12" y1="6.5" x2="6.5" y2="12" stroke="currentColor" strokeWidth="0.75" />
+      <line x1="17.5" y1="12" x2="12" y2="17.5" stroke="currentColor" strokeWidth="0.75" />
+    </g>
+    <defs>
+      <clipPath id="momo-icon-mask-clip">
+        <circle cx="12" cy="12" r="4.8" />
+      </clipPath>
+    </defs>
+  </svg>
+);
+
+// 米莫风格边框宽度图标 (内外双层方形线框)
+const IconBorderWidthMomo: React.FC<{ className?: string }> = ({ className = 'w-5.5 h-5.5' }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+    <rect x="3" y="3" width="18" height="18" rx="1.5" />
+    <rect x="6.5" y="6.5" width="11" height="11" rx="0.5" />
+  </svg>
+);
+
+// 米莫风格边框颜色图标 (经典水滴/色滴)
+const IconBorderColorMomo: React.FC<{ className?: string }> = ({ className = 'w-5.5 h-5.5' }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+  </svg>
+);
+
+// 米莫风格边框圆角图标 (大圆角矩形，右上角饱满大弧度，无杂质虚线)
+const IconBorderRadiusMomo: React.FC<{ className?: string }> = ({ className = 'w-5.5 h-5.5' }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M3.5 3.5h7.5a9.5 9.5 0 0 1 9.5 9.5v7.5h-17V3.5z" />
+  </svg>
+);
+
+// 颜色转换辅助函数 (HEX <-> HSV)
+function hexToHsv(hex: string): { h: number; s: number; v: number } {
+  let c = (hex || '#ffffff').replace('#', '');
+  if (c.length === 3) c = c.split('').map((x) => x + x).join('');
+  const num = parseInt(c || 'ffffff', 16);
+  const r = ((num >> 16) & 255) / 255;
+  const g = ((num >> 8) & 255) / 255;
+  const b = (num & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h = Math.round(h * 60);
+    if (h < 0) h += 360;
   }
+  const s = max === 0 ? 0 : d / max;
+  const v = max;
+  return { h, s: Math.round(s * 100), v: Math.round(v * 100) };
+}
+
+function hsvToHex(h: number, s: number, v: number): string {
+  const sat = s / 100;
+  const val = v / 100;
+  const i = Math.floor((h / 60) % 6);
+  const f = h / 60 - i;
+  const p = val * (1 - sat);
+  const q = val * (1 - f * sat);
+  const t = val * (1 - (1 - f) * sat);
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  switch (i) {
+    case 0: r = val; g = t; b = p; break;
+    case 1: r = q; g = val; b = p; break;
+    case 2: r = p; g = val; b = t; break;
+    case 3: r = p; g = q; b = val; break;
+    case 4: r = t; g = p; b = val; break;
+    case 5: r = val; g = p; b = q; break;
+  }
+  const toHex = (x: number) => Math.round(x * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// 常用调色板与主题色配置 (1:1 精准对应米莫印品)
+const MOMO_THEME_COLORS = [
+  '#fbece4', '#d4f1f4', '#faf5eb', '#ebd067', '#3d4b66', '#56657f', '#faf8f5'
+];
+
+const MOMO_COMMON_COLORS = [
+  '#ffffff', '#000000', '#dd0061', '#009fe8', '#b8a793', '#8da2af', '#eea38f', '#50718d', '#eca800',
+  '#eb6100', '#d81e06', '#70b603', '#bae5f8', '#5a3825', '#921b1d', '#134f2c', '#fdf08a', '#f6d38b',
+  '#a6d743'
+];
+
+const BORDER_WIDTH_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20];
+const BORDER_RADIUS_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 40, 50];
+
+// 米莫印品标准点数 (pt) 转画布预览像素 (px) 精确比例换算
+// 1 pt ≈ 0.44px (在 6 点时呈现约 2.6px 精致画框描边，与米莫印刷编辑器 1:1 视觉对齐)
+export const getMomoBorderWidthPx = (pt?: number): number => {
+  if (!pt || pt <= 0) return 0;
+  return Math.round(pt * 0.44 * 10) / 10;
+};
+
+// 米莫风格两级颜色拾取气泡弹窗 (左侧常用色盘位置固定，点“更多颜色...”在右侧原位平滑扩展调色板)
+const MomoColorPickerPopover: React.FC<{
+  currentColor: string;
+  onSelectColor: (color: string) => void;
+  onClose: () => void;
+}> = ({ currentColor, onSelectColor, onClose }) => {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [tempColor, setTempColor] = useState(currentColor || '#ffffff');
+  const [hsv, setHsv] = useState(() => hexToHsv(currentColor || '#ffffff'));
+  const satValBoxRef = useRef<HTMLDivElement>(null);
+  const hueBarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setTempColor(currentColor || '#ffffff');
+    setHsv(hexToHsv(currentColor || '#ffffff'));
+  }, [currentColor]);
+
+  const handleSatValMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const updateSatVal = (moveEvt: MouseEvent) => {
+      if (!satValBoxRef.current) return;
+      const rect = satValBoxRef.current.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, moveEvt.clientX - rect.left));
+      const y = Math.max(0, Math.min(rect.height, moveEvt.clientY - rect.top));
+      const s = Math.round((x / rect.width) * 100);
+      const v = Math.round((1 - y / rect.height) * 100);
+      const newHsv = { ...hsv, s, v };
+      setHsv(newHsv);
+      const hex = hsvToHex(newHsv.h, s, v);
+      setTempColor(hex);
+    };
+
+    updateSatVal(e.nativeEvent);
+
+    const onMouseMove = (moveEvt: MouseEvent) => updateSatVal(moveEvt);
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleHueMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const updateHue = (moveEvt: MouseEvent) => {
+      if (!hueBarRef.current) return;
+      const rect = hueBarRef.current.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, moveEvt.clientX - rect.left));
+      const h = Math.round((x / rect.width) * 360);
+      const newHsv = { ...hsv, h };
+      setHsv(newHsv);
+      const hex = hsvToHex(h, newHsv.s, newHsv.v);
+      setTempColor(hex);
+    };
+
+    updateHue(e.nativeEvent);
+
+    const onMouseMove = (moveEvt: MouseEvent) => updateHue(moveEvt);
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleHexChange = (val: string) => {
+    setTempColor(val);
+    if (/^#[0-9A-Fa-f]{6}$/.test(val) || /^#[0-9A-Fa-f]{3}$/.test(val)) {
+      setHsv(hexToHsv(val));
+    }
+  };
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="absolute bottom-full mb-2.5 left-0 bg-white rounded-xl shadow-2xl border border-neutral-200 p-3.5 z-[10000] flex text-neutral-800 select-none whitespace-normal"
+    >
+      {/* 左侧：主题色与常用颜色 (位置绝对固定，完全不位移、不抖动) */}
+      <div className="w-48 space-y-3 pr-1 shrink-0">
+        <div>
+          <div className="text-[12px] text-neutral-600 font-normal mb-2">当前主题颜色</div>
+          <div className="flex items-center gap-1.5">
+            {MOMO_THEME_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => {
+                  onSelectColor(c);
+                  onClose();
+                }}
+                className="w-5.5 h-5.5 rounded-[2px] border border-neutral-200/90 hover:scale-105 transition-transform cursor-pointer shadow-2xs"
+                style={{ backgroundColor: c }}
+                title={c}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[12px] text-neutral-600 font-normal mb-2">其他常用颜色</div>
+          <div className="grid grid-cols-9 gap-1.5">
+            {MOMO_COMMON_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => {
+                  onSelectColor(c);
+                  onClose();
+                }}
+                className="w-4.5 h-4.5 rounded-[2px] border border-neutral-200/80 hover:scale-105 transition-transform cursor-pointer shadow-2xs"
+                style={{ backgroundColor: c }}
+                title={c}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
+          <button
+            onClick={() => setShowAdvanced((prev) => !prev)}
+            className="text-[12px] text-neutral-600 hover:text-neutral-900 font-normal cursor-pointer flex items-center space-x-1"
+          >
+            <span>更多颜色...</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 右侧：高级拾色器 (点击“更多颜色...”后无缝紧贴右侧展示，左边完全不动，不跳动) */}
+      {showAdvanced && (
+        <div className="w-56 ml-3 pl-3.5 border-l border-neutral-200 space-y-3 flex flex-col shrink-0">
+          {/* 2D 饱和度与明度调色板 */}
+          <div
+            ref={satValBoxRef}
+            onMouseDown={handleSatValMouseDown}
+            className="w-full h-36 rounded relative cursor-crosshair overflow-hidden border border-neutral-200"
+            style={{
+              backgroundColor: `hsl(${hsv.h}, 100%, 50%)`,
+              backgroundImage:
+                'linear-gradient(to right, #fff, transparent), linear-gradient(to top, #000, transparent)',
+            }}
+          >
+            <div
+              className="absolute w-4 h-4 rounded-full border-2 border-white shadow-[0_0_2px_rgba(0,0,0,0.8)] -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+              style={{
+                left: `${hsv.s}%`,
+                top: `${100 - hsv.v}%`,
+                backgroundColor: 'transparent',
+              }}
+            />
+          </div>
+
+          {/* 颜色预览圆圈 + 彩虹色相滑条 */}
+          <div className="flex items-center space-x-2.5">
+            <div
+              className="w-6 h-6 rounded-full border border-neutral-200 shrink-0 shadow-2xs"
+              style={{ backgroundColor: tempColor }}
+            />
+            <div
+              ref={hueBarRef}
+              onMouseDown={handleHueMouseDown}
+              className="flex-1 h-3 rounded-full relative cursor-pointer"
+              style={{
+                background:
+                  'linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)',
+              }}
+            >
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-[0_1px_3px_rgba(0,0,0,0.3)] border border-neutral-200 -translate-x-1/2 pointer-events-none"
+                style={{ left: `${(hsv.h / 360) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* HEX 色值输入 */}
+          <div className="flex flex-col items-center space-y-1">
+            <div className="w-full flex items-center justify-between border border-neutral-200 rounded px-2.5 py-1 bg-white">
+              <input
+                type="text"
+                value={tempColor.toUpperCase()}
+                onChange={(e) => handleHexChange(e.target.value)}
+                className="w-full bg-transparent font-mono text-center outline-none text-neutral-800 text-xs tracking-wider"
+              />
+              <div className="flex flex-col text-[8px] text-neutral-400 leading-none pl-1">
+                <span>▲</span>
+                <span>▼</span>
+              </div>
+            </div>
+            <span className="text-[11px] text-neutral-400 font-normal">HEX</span>
+          </div>
+
+          {/* 底部 确定 / 取消 操作按钮 */}
+          <div className="flex items-center space-x-2 pt-1 border-t border-neutral-100 mt-auto">
+            <button
+              onClick={() => {
+                onSelectColor(tempColor);
+                onClose();
+              }}
+              className="flex-1 py-1.5 bg-neutral-100 text-neutral-700 hover:bg-neutral-200 rounded text-xs font-normal transition-colors cursor-pointer active:scale-95 text-center"
+            >
+              确定
+            </button>
+            <button
+              onClick={onClose}
+              className="flex-1 py-1.5 bg-neutral-100 text-neutral-700 hover:bg-neutral-200 rounded text-xs font-normal transition-colors cursor-pointer active:scale-95 text-center"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// 异形遮罩计算样式 (采用高精度矢量 clipPath 与 objectBoundingBox)
+export const getMaskStyle = (maskShape?: string): React.CSSProperties => {
+  return getMomoMaskStyle(maskShape);
 };
 
 // 导出供外部使用的画框尺寸测量结构
@@ -285,7 +600,7 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
   const [textVal, setTextVal] = useState(slot.text || '');
-  const [activePopover, setActivePopover] = useState<'mask' | 'border' | 'effects' | 'layers' | null>(null);
+  const [activePopover, setActivePopover] = useState<'mask' | 'borderWidth' | 'borderColor' | 'borderRadius' | 'effects' | 'layers' | null>(null);
 
   // 1. 照片内部裁剪/平移状态 (方案1：按住即平移，松手即完成，无需二次确认)
   const [isPanning, setIsPanning] = useState(false);
@@ -530,12 +845,19 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
 
     let currentSnappedX = initialX;
     let currentSnappedY = initialY;
-
-    setIsMovingFrame(true);
+    let hasMoved = false;
 
     const handleFrameMouseMove = (moveEvt: MouseEvent) => {
       const dx = moveEvt.clientX - startClientX;
       const dy = moveEvt.clientY - startClientY;
+
+      // 3px 移动阈值，防止单击误触移动状态
+      if (!hasMoved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        hasMoved = true;
+        setIsMovingFrame(true);
+      }
+
+      if (!hasMoved) return;
 
       const dxPercent = (dx / parentW) * 100;
       const dyPercent = (dy / parentH) * 100;
@@ -1485,7 +1807,7 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
         top: `${currentRenderY}%`,
         width: `${currentRenderW}%`,
         height: `${currentRenderH}%`,
-        zIndex: isMovingFrame ? 80 : (slot.zIndex !== undefined ? slot.zIndex : (zIndex !== undefined ? zIndex : 1)),
+        zIndex: slot.zIndex !== undefined ? slot.zIndex : (zIndex !== undefined ? zIndex : 1),
       }}
       className="absolute pointer-events-none select-none"
     >
@@ -1495,9 +1817,22 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
           transform: currentRotation ? `rotate(${currentRotation}deg)` : undefined,
           transformOrigin: 'center center',
           opacity: slot.opacity !== undefined ? slot.opacity : 1,
-          boxShadow: slot.hasShadow
-            ? '0 12px 28px -4px rgba(0, 0, 0, 0.28), 0 4px 10px -2px rgba(0, 0, 0, 0.12)'
-            : undefined,
+          borderRadius:
+            slot.maskShape && slot.maskShape !== 'none'
+              ? undefined
+              : slot.borderRadius
+              ? `${slot.borderRadius}px`
+              : undefined,
+          boxShadow: [
+            slot.borderWidth && slot.borderWidth > 0
+              ? `0 0 0 ${getMomoBorderWidthPx(slot.borderWidth)}px ${slot.borderColor || '#ffffff'}`
+              : '',
+            slot.hasShadow
+              ? '0 12px 28px -4px rgba(0, 0, 0, 0.28), 0 4px 10px -2px rgba(0, 0, 0, 0.12)'
+              : '',
+          ]
+            .filter(Boolean)
+            .join(', ') || undefined,
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -1510,7 +1845,13 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
         }}
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
-        className={`w-full h-full relative group bg-[#e2e3e5] pointer-events-auto ${
+        className={`w-full h-full relative group pointer-events-auto ${
+          slot.maskShape && slot.maskShape !== 'none'
+            ? 'bg-transparent'
+            : photo
+            ? 'bg-transparent'
+            : 'bg-[#e2e3e5]'
+        } ${
           isSwapTargetHovered
             ? 'shadow-md z-40'
             : isMovingFrame
@@ -1519,7 +1860,9 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
             ? 'cursor-move'
             : 'cursor-default'
         } ${
-          !isSelected && !isMultiSelected && !isSwapTargetHovered ? 'hover:outline hover:outline-1 hover:outline-neutral-400' : ''
+          !isSelected && !isMultiSelected && !isSwapTargetHovered && (!slot.maskShape || slot.maskShape === 'none')
+            ? 'hover:outline hover:outline-1 hover:outline-neutral-400'
+            : ''
         }`}
       >
       {/* 拖拽互换照片目标悬停高亮提示层 (轻巧 1.5px 优雅细框 + 微透薄纱 + 紧凑精致微徽章) */}
@@ -1538,7 +1881,7 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
         </div>
       )}
 
-      {/* 照片渲染或占位图 (应用圆角、边框、遮罩) */}
+      {/* 照片渲染或占位图 (应用圆角、外描边适配、遮罩) */}
       <div
         style={{
           borderRadius:
@@ -1546,10 +1889,6 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
               ? undefined
               : slot.borderRadius
               ? `${slot.borderRadius}px`
-              : undefined,
-          border:
-            slot.borderWidth && slot.borderWidth > 0
-              ? `${slot.borderWidth}px solid ${slot.borderColor || '#ffffff'}`
               : undefined,
           ...getMaskStyle(slot.maskShape),
         }}
@@ -1624,7 +1963,11 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
           </div>
         ) : (
           /* 现代相册经典上下垂直布局：[ 📷 相机在上 + 拖照片至此添加在下 ] */
-          <div className="w-full h-full flex items-center justify-center p-2 pointer-events-none select-none overflow-hidden">
+          <div
+            className={`w-full h-full flex items-center justify-center p-2 pointer-events-none select-none overflow-hidden ${
+              slot.maskShape && slot.maskShape !== 'none' ? 'bg-[#e2e3e5]' : ''
+            }`}
+          >
             <div
               style={{
                 transform: `scale(${placeholderScale})`,
@@ -1696,44 +2039,9 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
         </div>
       )}
 
-      {/* ========== 选中画框时的 8 个调整尺寸手柄 + 顶部旋转手柄 + 蓝色毫米尺寸/坐标浮动标签 ========== */}
+      {/* ========== 选中画框时的 8 个调整尺寸手柄 + 顶部旋转手柄 ========== */}
       {isSelected && !hasMultipleSelection && (
         <>
-          {/* 柔和天蓝色毫米微型浮动标签 (#3c78d8) */}
-          {isMovingFrame && (
-            <div className="absolute top-1/2 -translate-y-1/2 left-[52%] z-60 bg-[#3c78d8] text-white text-[9.5px] font-sans px-1.5 py-0.5 rounded-[3px] shadow-xs pointer-events-none whitespace-nowrap leading-[13px] flex flex-col items-start select-none animate-fade-in tracking-tight">
-              <div className="flex items-center space-x-1">
-                <span className="opacity-95">X :</span>
-                <span>
-                  {((currentRenderX * (bookSpec?.widthMm || 200)) / 100).toFixed(2)}mm
-                </span>
-              </div>
-              <div className="flex items-center space-x-1">
-                <span className="opacity-95">Y :</span>
-                <span>
-                  {((currentRenderY * (bookSpec?.heightMm || 200)) / 100).toFixed(2)}mm
-                </span>
-              </div>
-            </div>
-          )}
-
-          {activeResizeHandle && (
-            <div className="absolute -top-7 left-2 z-60 bg-[#3c78d8] text-white text-[9.5px] font-sans px-1.5 py-0.5 rounded-[3px] shadow-xs pointer-events-none whitespace-nowrap leading-[13px] flex flex-col items-start select-none animate-fade-in tracking-tight">
-              <div className="flex items-center space-x-1">
-                <span className="opacity-95">宽 :</span>
-                <span>
-                  {((currentRenderW * (bookSpec?.widthMm || 200)) / 100).toFixed(2)}mm
-                </span>
-              </div>
-              <div className="flex items-center space-x-1">
-                <span className="opacity-95">高 :</span>
-                <span>
-                  {((currentRenderH * (bookSpec?.heightMm || 200)) / 100).toFixed(2)}mm
-                </span>
-              </div>
-            </div>
-          )}
-
           {/* 选框外边框 (纯白发光细线，四角圆点 + 四边胶囊条 + 顶部旋转手柄) */}
           <div className="absolute inset-0 pointer-events-none border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.22)] z-30">
             {photo && (
@@ -1823,7 +2131,68 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
       )}
       </div>
 
-      {/* ========== 全新设计的照片快速操作浮动条 (Photo Quick Action Bar 舒适大尺寸版，通过 createPortal 挂载到全局顶层 document.body，彻底解决被文字框或兄弟图层遮挡的问题) ========== */}
+      {/* ========== 柔和天蓝色毫米微型浮动标签 (通过 createPortal 挂载到全局顶层 document.body，彻底解决被上层其他重叠照片遮挡的问题) ========== */}
+      {isSelected && !hasMultipleSelection && (isMovingFrame || activeResizeHandle) && frameRef.current && typeof document !== 'undefined' && createPortal(
+        (() => {
+          const rect = frameRef.current?.getBoundingClientRect();
+          if (!rect) return null;
+          if (isMovingFrame) {
+            return (
+              <div
+                style={{
+                  position: 'fixed',
+                  left: `${rect.left + rect.width * 0.52}px`,
+                  top: `${rect.top + rect.height * 0.5}px`,
+                  transform: 'translateY(-50%)',
+                }}
+                className="z-[99999] bg-[#3c78d8] text-white text-[9.5px] font-sans px-1.5 py-0.5 rounded-[3px] shadow-xs pointer-events-none whitespace-nowrap leading-[13px] flex flex-col items-start select-none animate-fade-in tracking-tight"
+              >
+                <div className="flex items-center space-x-1">
+                  <span className="opacity-95">X :</span>
+                  <span>
+                    {((currentRenderX * (bookSpec?.widthMm || 200)) / 100).toFixed(2)}mm
+                  </span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <span className="opacity-95">Y :</span>
+                  <span>
+                    {((currentRenderY * (bookSpec?.heightMm || 200)) / 100).toFixed(2)}mm
+                  </span>
+                </div>
+              </div>
+            );
+          }
+          if (activeResizeHandle) {
+            return (
+              <div
+                style={{
+                  position: 'fixed',
+                  left: `${rect.left + 8}px`,
+                  top: `${rect.top - 28}px`,
+                }}
+                className="z-[99999] bg-[#3c78d8] text-white text-[9.5px] font-sans px-1.5 py-0.5 rounded-[3px] shadow-xs pointer-events-none whitespace-nowrap leading-[13px] flex flex-col items-start select-none animate-fade-in tracking-tight"
+              >
+                <div className="flex items-center space-x-1">
+                  <span className="opacity-95">宽 :</span>
+                  <span>
+                    {((currentRenderW * (bookSpec?.widthMm || 200)) / 100).toFixed(2)}mm
+                  </span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <span className="opacity-95">高 :</span>
+                  <span>
+                    {((currentRenderH * (bookSpec?.heightMm || 200)) / 100).toFixed(2)}mm
+                  </span>
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })(),
+        document.body
+      )}
+
+      {/* ========== 全新设计的照片快速操作浮动条 (Photo Quick Action Bar 紧凑版，通过 createPortal 挂载到全局顶层 document.body，彻底解决被文字框或兄弟图层遮挡的问题) ========== */}
       {isSelected && !hasMultipleSelection && !isRotating && toolbarPos && typeof document !== 'undefined' && createPortal(
         <div
           onClick={(e) => e.stopPropagation()}
@@ -1834,62 +2203,62 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
             top: `${toolbarPos.top}px`,
             transform: toolbarPos.placeAbove ? 'translate(-50%, -100%)' : 'translateX(-50%)',
           }}
-          className="bg-white/98 text-neutral-700 shadow-2xl border border-[#dadce0] rounded-2xl px-3 py-2 flex items-center space-x-2 z-[9999] backdrop-blur-md whitespace-nowrap text-sm animate-fade-in pointer-events-auto"
+          className="bg-white/98 text-neutral-700 shadow-2xl border border-[#dadce0] rounded-2xl px-2 py-1.5 flex items-center gap-1 z-[9999] backdrop-blur-md whitespace-nowrap text-sm animate-fade-in pointer-events-auto"
         >
           {/* 【第 1 组：构图与方向】 */}
           {photo && (
             <>
               {/* 1. 缩小与放大按钮组 */}
-              <div className="flex items-center space-x-1 bg-neutral-100/90 rounded-xl p-1 border border-neutral-200/80">
+              <div className="flex items-center gap-0.5 bg-neutral-100/90 rounded-lg p-0.5 border border-neutral-200/80">
                 <button
                   onClick={() => handleScaleChange(crop.scale - 0.1)}
-                  className="w-8.5 h-8.5 flex items-center justify-center hover:bg-white hover:text-[#76383d] text-neutral-700 rounded-lg cursor-pointer transition-colors active:scale-95"
-                  title="缩小照片"
+                  className="w-7.5 h-7.5 flex items-center justify-center hover:bg-white hover:text-[#76383d] text-neutral-700 rounded-md cursor-pointer transition-colors active:scale-95"
+                  title="缩小"
                 >
-                  <ZoomOut className="w-5 h-5 stroke-[2]" />
+                  <ZoomOut className="w-4.5 h-4.5 stroke-[2]" />
                 </button>
                 <button
                   onClick={() => handleScaleChange(crop.scale + 0.1)}
-                  className="w-8.5 h-8.5 flex items-center justify-center hover:bg-white hover:text-[#76383d] text-neutral-700 rounded-lg cursor-pointer transition-colors active:scale-95"
-                  title="放大照片"
+                  className="w-7.5 h-7.5 flex items-center justify-center hover:bg-white hover:text-[#76383d] text-neutral-700 rounded-md cursor-pointer transition-colors active:scale-95"
+                  title="放大"
                 >
-                  <ZoomIn className="w-5 h-5 stroke-[2]" />
+                  <ZoomIn className="w-4.5 h-4.5 stroke-[2]" />
                 </button>
               </div>
 
               {/* 2. 图片适应照片框功能 */}
               <button
                 onClick={handleFitFrameToPhoto}
-                className="w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 active:scale-95"
-                title="适应框 (使画框外框与照片双向 100% 贴合，无裁切且无白边)"
+                className="w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 active:scale-95"
+                title="图片框适应"
               >
-                <IconFitFrame className="w-5.5 h-5.5" />
+                <IconFitFrame className="w-5 h-5" />
               </button>
 
               {/* 3. 照片框内顺时针旋转 90° */}
               <button
                 onClick={handleRotate}
-                className="w-9 h-9 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-xl cursor-pointer transition-colors active:scale-95"
-                title="框内顺时针旋转 90°"
+                className="w-8 h-8 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-lg cursor-pointer transition-colors active:scale-95"
+                title="旋转"
               >
-                <RotateCw className="w-5 h-5 stroke-[2]" />
+                <RotateCw className="w-4.5 h-4.5 stroke-[2]" />
               </button>
 
               {/* 4. 水平镜像翻转 */}
               <button
                 onClick={() => onUpdateSlotProps?.({ flipH: !slot.flipH })}
-                className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors active:scale-95 ${
+                className={`w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors active:scale-95 ${
                   slot.flipH
                     ? 'bg-[#faf4f5] text-[#76383d] ring-1.5 ring-[#76383d]'
                     : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
                 }`}
-                title={slot.flipH ? '水平翻转 (当前已翻转，点击恢复正常)' : '水平翻转 (左右镜像)'}
+                title="水平翻转"
               >
-                <IconFlipHorizontalMomo className="w-5.5 h-5.5" />
+                <IconFlipHorizontalMomo className="w-5 h-5" />
               </button>
 
               {/* 分割线 */}
-              <div className="w-[1px] h-5 bg-neutral-200 shrink-0" />
+              <div className="w-[1px] h-4 bg-neutral-200 shrink-0 mx-0.5" />
             </>
           )}
 
@@ -1897,59 +2266,62 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
           {/* 5. 照片在整个页面满屏功能 */}
           <button
             onClick={handleMakeFullScreenClick}
-            className="w-9 h-9 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-xl cursor-pointer transition-colors active:scale-95"
-            title="一键满屏 (将照片铺满当前整页)"
+            className="w-8 h-8 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-lg cursor-pointer transition-colors active:scale-95"
+            title="满屏"
           >
-            <IconFullScreenMomo className="w-5.5 h-5.5" />
+            <IconFullScreenMomo className="w-5 h-5" />
           </button>
 
           {/* 分割线 */}
-          <div className="w-[1px] h-5 bg-neutral-200 shrink-0" />
+          <div className="w-[1px] h-4 bg-neutral-200 shrink-0 mx-0.5" />
 
           {/* 【第 3 组：遮罩与样式装饰】 */}
-          {/* 7. 遮罩功能 (异形照片框) */}
+          {/* 7. 遮罩功能 (米莫 40+ 精品异形照片框) */}
           <div className="relative">
             <button
               onClick={() => setActivePopover((prev) => (prev === 'mask' ? null : 'mask'))}
-              className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors ${
+              className={`w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
                 activePopover === 'mask' || (slot.maskShape && slot.maskShape !== 'none')
                   ? 'bg-[#faf4f5] text-[#76383d] font-medium border border-[#ebdbe0]'
                   : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
               }`}
-              title="遮罩功能 (异形照片框)"
+              title="遮罩"
             >
-              <Shapes className="w-5 h-5 stroke-[2]" />
+              <IconMaskMomo className="w-5 h-5" />
             </button>
 
-            {/* 遮罩气泡弹窗 */}
+            {/* 遮罩气泡弹窗 (4列网格，选定即生效并自动收起) */}
             {activePopover === 'mask' && (
-              <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 p-3 z-[10000] w-56 animate-fade-in text-neutral-800">
-                <div className="flex items-center justify-between pb-2 border-b border-neutral-100 mb-2">
-                  <span className="font-semibold text-xs text-neutral-800">异形照片框遮罩</span>
-                  <button
-                    onClick={() => setActivePopover(null)}
-                    className="text-neutral-400 hover:text-neutral-600 text-xs cursor-pointer p-1"
-                  >
-                    ✕
-                  </button>
+              <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 p-2.5 z-[10000] w-64 animate-fade-in text-neutral-800">
+                <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100 mb-2 px-1">
+                  <span className="font-medium text-xs text-neutral-800">遮罩形状</span>
                 </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {PRESET_MASKS.map((m) => {
+                <div className="grid grid-cols-4 gap-1.5 max-h-64 overflow-y-auto pr-1">
+                  {MOMO_MASK_DEFINITIONS.map((m) => {
                     const isCurrent = (slot.maskShape || 'none') === m.id;
                     return (
                       <button
                         key={m.id}
                         onClick={() => {
                           onUpdateSlotProps?.({ maskShape: m.id });
+                          setActivePopover(null);
                         }}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all cursor-pointer ${
+                        title={m.name}
+                        className={`aspect-square rounded-md border flex items-center justify-center p-1.5 transition-all cursor-pointer bg-white ${
                           isCurrent
-                            ? 'bg-[#faf4f5] border-[#76383d] text-[#76383d] font-bold ring-1 ring-[#76383d]'
-                            : 'hover:bg-neutral-50 border-neutral-200 text-neutral-700'
+                            ? 'border-[#76383d] ring-1.5 ring-[#76383d] shadow-2xs'
+                            : 'border-[#e2e4e8] hover:border-neutral-400 hover:bg-neutral-50/80'
                         }`}
                       >
-                        <span className="text-base leading-none mb-1">{m.icon}</span>
-                        <span className="text-[10px] leading-none truncate max-w-full">{m.name}</span>
+                        {m.isNone ? (
+                          <div className="w-full h-full border border-dashed border-neutral-300 rounded-[2px] bg-neutral-50/50 flex items-center justify-center">
+                            <span className="text-[9px] text-neutral-400 font-medium scale-90">原图</span>
+                          </div>
+                        ) : (
+                          <svg viewBox="0 0 100 100" className="w-full h-full fill-[#a3a3a3] pointer-events-none">
+                            <path d={m.pathD} />
+                          </svg>
+                        )}
                       </button>
                     );
                   })}
@@ -1958,204 +2330,128 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
             )}
           </div>
 
-          {/* 8. 照片描边功能与描边颜色 */}
+          {/* 8. 边框宽度 (米莫点数下拉菜单) */}
           <div className="relative">
             <button
-              onClick={() => setActivePopover((prev) => (prev === 'border' ? null : 'border'))}
-              className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors ${
-                activePopover === 'border' || (slot.borderWidth && slot.borderWidth > 0)
+              onClick={() => setActivePopover((prev) => (prev === 'borderWidth' ? null : 'borderWidth'))}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
+                activePopover === 'borderWidth' || (slot.borderWidth && slot.borderWidth > 0)
                   ? 'bg-[#faf4f5] text-[#76383d] font-medium border border-[#ebdbe0]'
                   : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
               }`}
-              title="照片描边与颜色"
+              title="边框描边"
             >
-              <Square className="w-5 h-5 stroke-[2]" />
+              <IconBorderWidthMomo className="w-5 h-5" />
             </button>
 
-            {/* 描边气泡弹窗 */}
-            {activePopover === 'border' && (
-              <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 p-3.5 z-[10000] w-60 animate-fade-in text-neutral-800 space-y-3">
-                <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
-                  <span className="font-semibold text-xs text-neutral-800">照片描边与颜色</span>
-                  <button
-                    onClick={() => setActivePopover(null)}
-                    className="text-neutral-400 hover:text-neutral-600 text-xs cursor-pointer p-1"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {/* 粗细选择 */}
-                <div>
-                  <label className="text-[11px] text-neutral-500 font-medium block mb-1.5">
-                    描边粗细: {slot.borderWidth || 0}px
-                  </label>
-                  <div className="flex items-center space-x-1">
-                    {[0, 1, 2, 4, 8, 12].map((w) => (
-                      <button
-                        key={w}
-                        onClick={() => onUpdateSlotProps?.({ borderWidth: w })}
-                        className={`flex-1 py-1 text-[11px] rounded border transition-colors cursor-pointer ${
-                          (slot.borderWidth || 0) === w
-                            ? 'bg-[#76383d] text-white border-[#76383d] font-semibold'
-                            : 'hover:bg-neutral-50 border-neutral-200 text-neutral-700'
-                        }`}
-                      >
-                        {w === 0 ? '无' : `${w}px`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 颜色选择 */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[11px] text-neutral-500 font-medium">描边颜色</label>
-                    <input
-                      type="color"
-                      value={slot.borderColor || '#ffffff'}
-                      onChange={(e) => onUpdateSlotProps?.({ borderColor: e.target.value })}
-                      className="w-5.5 h-5.5 rounded cursor-pointer border border-neutral-300 p-0"
-                      title="自定义拾色"
-                    />
-                  </div>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {PRESET_BORDER_COLORS.map((c) => (
-                      <button
-                        key={c.value}
-                        onClick={() => onUpdateSlotProps?.({ borderColor: c.value })}
-                        className="flex items-center space-x-1 p-1 rounded border border-neutral-200 hover:border-neutral-400 transition-all cursor-pointer text-left"
-                      >
-                        <span
-                          className="w-3.5 h-3.5 rounded-full border border-neutral-300 shrink-0 shadow-2xs"
-                          style={{ backgroundColor: c.value }}
-                        />
-                        <span className="text-[9px] text-neutral-600 truncate">{c.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+            {/* 边框点数下拉菜单 */}
+            {activePopover === 'borderWidth' && (
+              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 py-1.5 z-[10000] w-20 max-h-56 overflow-y-auto animate-fade-in text-neutral-800 text-xs select-none">
+                {BORDER_WIDTH_OPTIONS.map((pt) => {
+                  const isSelected = (slot.borderWidth || 0) === pt;
+                  return (
+                    <button
+                      key={pt}
+                      onClick={() => {
+                        onUpdateSlotProps?.({
+                          borderWidth: pt,
+                          borderColor: slot.borderColor || '#ffffff',
+                        });
+                        setActivePopover(null);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 hover:bg-[#faf4f5] hover:text-[#76383d] transition-colors cursor-pointer flex items-center justify-between text-xs ${
+                        isSelected ? 'bg-[#faf4f5] text-[#76383d] font-bold' : 'text-neutral-700'
+                      }`}
+                    >
+                      <span>{pt}点</span>
+                      {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-[#76383d]" />}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
 
-          {/* 9. 照片特效功能 (倒圆角、不透明度、阴影) */}
+          {/* 9. 边框颜色 (米莫水滴颜色气泡选择器) */}
           <div className="relative">
             <button
-              onClick={() => setActivePopover((prev) => (prev === 'effects' ? null : 'effects'))}
-              className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer transition-colors ${
-                activePopover === 'effects' ||
-                (slot.borderRadius && slot.borderRadius > 0) ||
-                slot.hasShadow ||
-                (slot.opacity !== undefined && slot.opacity < 1)
+              onClick={() => setActivePopover((prev) => (prev === 'borderColor' ? null : 'borderColor'))}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
+                activePopover === 'borderColor' || (slot.borderWidth && slot.borderWidth > 0 && slot.borderColor)
                   ? 'bg-[#faf4f5] text-[#76383d] font-medium border border-[#ebdbe0]'
                   : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
               }`}
-              title="照片特效 (倒圆角、不透明度、阴影)"
+              title="边框颜色"
             >
-              <Sparkles className="w-5 h-5 stroke-[2]" />
+              <IconBorderColorMomo className="w-5 h-5" />
             </button>
 
-            {/* 特效气泡弹窗 */}
-            {activePopover === 'effects' && (
-              <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 p-3.5 z-[10000] w-64 animate-fade-in text-neutral-800 space-y-3.5">
-                <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100">
-                  <span className="font-semibold text-xs text-neutral-800">倒圆角 & 阴影 & 透明度</span>
-                  <button
-                    onClick={() => setActivePopover(null)}
-                    className="text-neutral-400 hover:text-neutral-600 text-xs cursor-pointer p-1"
-                  >
-                    ✕
-                  </button>
-                </div>
+            {/* 颜色气泡弹窗 */}
+            {activePopover === 'borderColor' && (
+              <MomoColorPickerPopover
+                currentColor={slot.borderColor || '#ffffff'}
+                onSelectColor={(color) => {
+                  onUpdateSlotProps?.({
+                    borderColor: color,
+                    borderWidth: slot.borderWidth && slot.borderWidth > 0 ? slot.borderWidth : 2,
+                  });
+                }}
+                onClose={() => setActivePopover(null)}
+              />
+            )}
+          </div>
 
-                {/* 倒圆角 */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] text-neutral-600 font-medium">倒圆角半径</label>
-                    <span className="text-[10px] font-mono text-neutral-500 font-medium">
-                      {slot.borderRadius || 0}px
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="40"
-                    step="2"
-                    value={slot.borderRadius || 0}
-                    onChange={(e) => onUpdateSlotProps?.({ borderRadius: Number(e.target.value) })}
-                    className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-[#76383d]"
-                  />
-                  <div className="flex items-center space-x-1 mt-1.5">
-                    {[
-                      { name: '直角', val: 0 },
-                      { name: '微圆', val: 6 },
-                      { name: '圆角', val: 14 },
-                      { name: '大圆', val: 24 },
-                    ].map((r) => (
-                      <button
-                        key={r.val}
-                        onClick={() => onUpdateSlotProps?.({ borderRadius: r.val })}
-                        className={`flex-1 py-0.5 text-[10px] rounded border transition-colors cursor-pointer ${
-                          (slot.borderRadius || 0) === r.val
-                            ? 'bg-[#76383d] text-white border-[#76383d] font-semibold'
-                            : 'hover:bg-neutral-50 border-neutral-200 text-neutral-600'
-                        }`}
-                      >
-                        {r.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+          {/* 10. 边框圆角 (米莫圆角数值下拉菜单) */}
+          <div className="relative">
+            <button
+              onClick={() => setActivePopover((prev) => (prev === 'borderRadius' ? null : 'borderRadius'))}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
+                activePopover === 'borderRadius' || (slot.borderRadius && slot.borderRadius > 0)
+                  ? 'bg-[#faf4f5] text-[#76383d] font-medium border border-[#ebdbe0]'
+                  : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
+              }`}
+              title="边框圆角"
+            >
+              <IconBorderRadiusMomo className="w-5 h-5" />
+            </button>
 
-                {/* 不透明度 */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] text-neutral-600 font-medium">不透明度</label>
-                    <span className="text-[10px] font-mono text-neutral-500 font-medium">
-                      {Math.round((slot.opacity !== undefined ? slot.opacity : 1) * 100)}%
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="1.0"
-                    step="0.05"
-                    value={slot.opacity !== undefined ? slot.opacity : 1}
-                    onChange={(e) => onUpdateSlotProps?.({ opacity: Number(e.target.value) })}
-                    className="w-full h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-[#76383d]"
-                  />
-                </div>
-
-                {/* 投影开关 */}
-                <div className="pt-1 flex items-center justify-between border-t border-neutral-100">
-                  <span className="text-[11px] text-neutral-700 font-medium">相框自然投影</span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={!!slot.hasShadow}
-                      onChange={(e) => onUpdateSlotProps?.({ hasShadow: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-8 h-4.5 bg-neutral-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-[#76383d]"></div>
-                  </label>
-                </div>
+            {/* 圆角数值下拉菜单 */}
+            {activePopover === 'borderRadius' && (
+              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 py-1.5 z-[10000] w-18 max-h-56 overflow-y-auto animate-fade-in text-neutral-800 text-xs select-none">
+                {BORDER_RADIUS_OPTIONS.map((val) => {
+                  const isSelected = (slot.borderRadius || 0) === val;
+                  return (
+                    <button
+                      key={val}
+                      onClick={() => {
+                        onUpdateSlotProps?.({ borderRadius: val });
+                        setActivePopover(null);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 hover:bg-[#faf4f5] hover:text-[#76383d] transition-colors cursor-pointer flex items-center justify-between text-xs ${
+                        isSelected ? 'bg-[#faf4f5] text-[#76383d] font-bold' : 'text-neutral-700'
+                      }`}
+                    >
+                      <span>{val}</span>
+                      {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-[#76383d]" />}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
 
           {/* 分割线 */}
-          <div className="w-[1px] h-5 bg-neutral-200 shrink-0" />
+          <div className="w-[1px] h-4 bg-neutral-200 shrink-0 mx-0.5" />
 
           {/* 【第 4 组：管理与资产】 */}
           {/* 查找照片功能 */}
           {photo && (
             <button
               onClick={() => onLocatePhoto?.(photo.id)}
-              className="w-9 h-9 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-xl cursor-pointer transition-colors"
-              title="在左侧照片库中查找并高亮此照片"
+              className="w-8 h-8 flex items-center justify-center hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700 rounded-lg cursor-pointer transition-colors"
+              title="查找照片"
             >
-              <Search className="w-5 h-5 stroke-[2]" />
+              <Search className="w-4.5 h-4.5 stroke-[2]" />
             </button>
           )}
 
@@ -2163,10 +2459,10 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
           {photo && (
             <button
               onClick={onClearPhoto}
-              className="w-9 h-9 flex items-center justify-center hover:bg-rose-50 text-neutral-500 hover:text-rose-600 rounded-xl cursor-pointer transition-colors"
-              title="框内清空照片 (保留画框位置与尺寸)"
+              className="w-8 h-8 flex items-center justify-center hover:bg-rose-50 text-neutral-500 hover:text-rose-600 rounded-lg cursor-pointer transition-colors"
+              title="移除图片"
             >
-              <Trash2 className="w-5 h-5 stroke-[2]" />
+              <Trash2 className="w-4.5 h-4.5 stroke-[2]" />
             </button>
           )}
         </div>,

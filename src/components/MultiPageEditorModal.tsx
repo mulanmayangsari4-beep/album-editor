@@ -15,6 +15,7 @@ import {
   LayoutGrid,
 } from 'lucide-react';
 import { SpreadModel, UploadedPhoto, BookSpec } from '../types/editor';
+import { getMomoMaskStyle } from '../utils/masks';
 
 interface MultiPageEditorModalProps {
   isOpen: boolean;
@@ -74,31 +75,7 @@ export const IconMultiPageGrid: React.FC<{ className?: string }> = ({ className 
 );
 
 const getMaskStyle = (maskShape?: string): React.CSSProperties => {
-  if (!maskShape || maskShape === 'none') return {};
-  switch (maskShape) {
-    case 'circle':
-      return { clipPath: 'circle(50% at 50% 50%)' };
-    case 'heart':
-      return {
-        clipPath:
-          'polygon(50% 15%, 62% 0%, 82% 0%, 100% 18%, 100% 40%, 50% 95%, 0% 40%, 0% 18%, 18% 0%, 38% 0%)',
-      };
-    case 'star':
-      return {
-        clipPath:
-          'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
-      };
-    case 'diamond':
-      return { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' };
-    case 'triangle':
-      return { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' };
-    case 'hexagon':
-      return { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' };
-    case 'arch':
-      return { borderRadius: '1000px 1000px 0 0' };
-    default:
-      return {};
-  }
+  return getMomoMaskStyle(maskShape);
 };
 
 export const MultiPageEditorModal: React.FC<MultiPageEditorModalProps> = ({
@@ -208,7 +185,9 @@ export const MultiPageEditorModal: React.FC<MultiPageEditorModalProps> = ({
           return (
             <div
               key={slot.id}
-              className="absolute overflow-hidden bg-[#e9ebed]"
+              className={`absolute overflow-hidden ${
+                photo ? 'bg-transparent' : (slot.maskShape && slot.maskShape !== 'none' ? 'bg-[#e9ebed]' : 'bg-[#e9ebed]')
+              }`}
               style={{
                 left: `${slot.x}%`,
                 top: `${slot.y}%`,
@@ -222,8 +201,8 @@ export const MultiPageEditorModal: React.FC<MultiPageEditorModalProps> = ({
                     : slot.borderRadius
                     ? `${slot.borderRadius * 0.4}px`
                     : undefined,
-                border: hasBorder
-                  ? `${Math.max(1, (slot.borderWidth || 0) * 0.4)}px solid ${slot.borderColor || '#ffffff'}`
+                boxShadow: hasBorder
+                  ? `0 0 0 ${Math.max(1, (slot.borderWidth || 0) * 0.4)}px ${slot.borderColor || '#ffffff'}`
                   : undefined,
                 ...getMaskStyle(slot.maskShape),
               }}

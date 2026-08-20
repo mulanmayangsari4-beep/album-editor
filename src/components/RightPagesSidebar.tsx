@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { SpreadModel, UploadedPhoto, BookSpec } from '../types/editor';
 import { IconMultiPageGrid } from './MultiPageEditorModal';
+import { getMomoMaskStyle } from '../utils/masks';
 
 interface RightPagesSidebarProps {
   spreads: SpreadModel[];
@@ -117,13 +118,20 @@ export const RightPagesSidebar: React.FC<RightPagesSidebarProps> = ({
           return (
             <div
               key={slot.id}
-              className="absolute overflow-hidden bg-[#e2e3e5] border-[0.5px] border-black/5"
+              className={`absolute overflow-hidden ${photo ? 'bg-transparent' : 'bg-[#e2e3e5]'} border-[0.5px] border-black/5`}
               style={{
                 left: `${slot.x}%`,
                 top: `${slot.y}%`,
                 width: `${slot.width}%`,
                 height: `${slot.height}%`,
                 transform: slot.rotation ? `rotate(${slot.rotation}deg)` : undefined,
+                borderRadius:
+                  slot.maskShape && slot.maskShape !== 'none'
+                    ? undefined
+                    : slot.borderRadius
+                    ? `${slot.borderRadius * 0.25}px`
+                    : undefined,
+                ...getMomoMaskStyle(slot.maskShape),
               }}
             >
               {photo ? (

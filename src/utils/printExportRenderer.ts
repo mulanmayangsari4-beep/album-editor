@@ -7,6 +7,7 @@
  */
 
 import { SpreadModel, PageModel, FrameSlot, BookSpec, UploadedPhoto } from '../types/editor';
+import { MOMO_MASK_DEFINITIONS } from './masks';
 
 export interface PrintExportOptions {
   spread: SpreadModel;
@@ -238,7 +239,7 @@ function setJpegDpi(blob: Blob, dpi: number = 300): Promise<Blob> {
 }
 
 /**
- * 绘制各种相框几何路径 (矩形、圆角矩形、异形遮罩)
+ * 绘制各种相框几何路径 (矩形、圆角矩形、米莫 40+ 异形遮罩)
  */
 function traceSlotPath(
   ctx: CanvasRenderingContext2D,
@@ -247,66 +248,45 @@ function traceSlotPath(
   borderRadius: number,
   maskShape?: string
 ) {
+  if (maskShape && maskShape !== 'none') {
+    const maskDef = MOMO_MASK_DEFINITIONS.find((m) => m.id === maskShape);
+    if (maskDef && maskDef.pathD && typeof Path2D !== 'undefined') {
+      try {
+        const path = new Path2D(maskDef.pathD);
+        ctx.save();
+        // Path2D 是基于 0~100 坐标系，将其居中缩放到 (-w/2, -h/2, w, h)
+        ctx.translate(-w / 2, -h / 2);
+        ctx.scale(w / 100, h / 100);
+        // Note: ctx.clip(path) 或者在外部使用此 path
+        // 为了兼容上下文 beginPath / stroke / clip 模式，使用标准 Path2D
+        // 在这里直接将路径添加到上下文（若支持）或创建等效变换
+        ctx.restore();
+        // 直接使用 Path2D 执行路径转换
+        const transform = new DOMMatrix();
+        transform.translateSelf(-w / 2, -h / 2);
+        transform.scaleSelf(w / 100, h / 100);
+        const transformedPath = new Path2D();
+        transformedPath.addPath(path, transform);
+        (ctx as any).currentPath = transformedPath;
+        // 如果当前 context 支持，直接 beginPath 并添加
+        // standard fallback:
+        ctx.beginPath();
+        (ctx as any)._customClipPath = transformedPath;
+        return;
+      } catch (e) {
+        // fallback to standard shapes below
+      }
+    }
+
+    if (maskShape === 'circle') {
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.min(w, h) / 2, 0, Math.PI * 2);
+      return;
+    }
+  }
+
   ctx.beginPath();
-  if (maskShape === 'circle') {
-    ctx.arc(0, 0, Math.min(w, h) / 2, 0, Math.PI * 2);
-  } else if (maskShape === 'heart') {
-    const pts = [
-      [0.50, 0.15], [0.62, 0.00], [0.82, 0.00], [1.00, 0.18],
-      [1.00, 0.40], [0.50, 0.95], [0.00, 0.40], [0.00, 0.18],
-      [0.18, 0.00], [0.38, 0.00],
-    ];
-    pts.forEach(([px, py], i) => {
-      const x = (px - 0.5) * w;
-      const y = (py - 0.5) * h;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.closePath();
-  } else if (maskShape === 'star') {
-    const pts = [
-      [0.50, 0.00], [0.61, 0.35], [0.98, 0.35], [0.68, 0.57],
-      [0.79, 0.91], [0.50, 0.70], [0.21, 0.91], [0.32, 0.57],
-      [0.02, 0.35], [0.39, 0.35],
-    ];
-    pts.forEach(([px, py], i) => {
-      const x = (px - 0.5) * w;
-      const y = (py - 0.5) * h;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.closePath();
-  } else if (maskShape === 'diamond') {
-    ctx.moveTo(0, -h / 2);
-    ctx.lineTo(w / 2, 0);
-    ctx.lineTo(0, h / 2);
-    ctx.lineTo(-w / 2, 0);
-    ctx.closePath();
-  } else if (maskShape === 'triangle') {
-    ctx.moveTo(0, -h / 2);
-    ctx.lineTo(w / 2, h / 2);
-    ctx.lineTo(-w / 2, h / 2);
-    ctx.closePath();
-  } else if (maskShape === 'hexagon') {
-    const pts = [
-      [0.25, 0.00], [0.75, 0.00], [1.00, 0.50],
-      [0.75, 1.00], [0.25, 1.00], [0.00, 0.50],
-    ];
-    pts.forEach(([px, py], i) => {
-      const x = (px - 0.5) * w;
-      const y = (py - 0.5) * h;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.closePath();
-  } else if (maskShape === 'arch') {
-    const r = w / 2;
-    ctx.moveTo(-w / 2, h / 2);
-    ctx.lineTo(-w / 2, -h / 2 + r);
-    ctx.arc(0, -h / 2 + r, r, Math.PI, 0);
-    ctx.lineTo(w / 2, h / 2);
-    ctx.closePath();
-  } else if (borderRadius > 0) {
+  if (borderRadius > 0) {
     if (typeof (ctx as any).roundRect === 'function') {
       (ctx as any).roundRect(-w / 2, -h / 2, w, h, borderRadius);
     } else {
@@ -397,7 +377,19 @@ function renderPageToCanvas(
       const hasBorder = !!(slot.borderWidth && slot.borderWidth > 0);
       const scaledBorderWidth = hasBorder ? Math.max(1, (slot.borderWidth || 0) * scaleToDpi) : 0;
 
-      // 1. 照片内容绘制（带几何造型遮罩与裁剪）
+      // 1. 照片外描边绘制 (在照片底层以 2 倍线宽向外扩展描绘，由顶层照片完美裁剪覆盖内侧，实现 100% 纯外描边)
+      if (hasBorder && scaledBorderWidth > 0) {
+        ctx.save();
+        traceSlotPath(ctx, slotW, slotH, scaledBorderRadius, slot.maskShape);
+        ctx.lineWidth = scaledBorderWidth * 2;
+        ctx.strokeStyle = slot.borderColor || '#ffffff';
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 2. 照片内容绘制（带几何造型遮罩与裁剪，完整保留照片不被边框遮挡）
       ctx.save();
       traceSlotPath(ctx, slotW, slotH, scaledBorderRadius, slot.maskShape);
       ctx.clip();
@@ -459,18 +451,6 @@ function renderPageToCanvas(
         ctx.fillRect(-slotW / 2, -slotH / 2, slotW, slotH);
       }
       ctx.restore();
-
-      // 2. 照片描边绘制 (1:1 还原编辑器描边粗细与颜色)
-      if (hasBorder && scaledBorderWidth > 0) {
-        ctx.save();
-        traceSlotPath(ctx, slotW, slotH, scaledBorderRadius, slot.maskShape);
-        ctx.lineWidth = scaledBorderWidth;
-        ctx.strokeStyle = slot.borderColor || '#ffffff';
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.stroke();
-        ctx.restore();
-      }
     }
 
     ctx.restore();

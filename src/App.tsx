@@ -30,6 +30,7 @@ import {
   migrateProjectDocument,
   normalizeSlot,
 } from './utils/projectSerializer';
+import { MomoGlobalClipPaths } from './utils/masks';
 
 export default function App() {
   const [bookSpec, setBookSpec] = useState<BookSpec>(DEFAULT_BOOK_SPEC);
@@ -1762,11 +1763,14 @@ export default function App() {
       <PrintExportModal
         isOpen={isPrintExportOpen}
         onClose={() => setIsPrintExportOpen(false)}
-        currentSpread={currentSpread}
+        spreads={spreads}
         bookSpec={bookSpec}
         photos={photos}
         projectName={projectName}
       />
+
+      {/* 全局 SVG 遮罩定义 */}
+      <MomoGlobalClipPaths />
 
       {/* 全局操作 Toast 提示 */}
       {toastMessage && (

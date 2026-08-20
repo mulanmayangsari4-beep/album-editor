@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, ChevronLeft, ChevronRight, BookOpen } from 'lucide-react';
 import { SpreadModel, UploadedPhoto, BookSpec } from '../types/editor';
+import { getMomoBorderWidthPx } from './PhotoFrame';
+import { getMomoMaskStyle } from '../utils/masks';
 
 interface PreviewModalProps {
   isOpen: boolean;
@@ -11,31 +13,7 @@ interface PreviewModalProps {
 }
 
 const getMaskStyle = (maskShape?: string): React.CSSProperties => {
-  if (!maskShape || maskShape === 'none') return {};
-  switch (maskShape) {
-    case 'circle':
-      return { clipPath: 'circle(50% at 50% 50%)' };
-    case 'heart':
-      return {
-        clipPath:
-          'polygon(50% 15%, 62% 0%, 82% 0%, 100% 18%, 100% 40%, 50% 95%, 0% 40%, 0% 18%, 18% 0%, 38% 0%)',
-      };
-    case 'star':
-      return {
-        clipPath:
-          'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
-      };
-    case 'diamond':
-      return { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' };
-    case 'triangle':
-      return { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' };
-    case 'hexagon':
-      return { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' };
-    case 'arch':
-      return { borderRadius: '1000px 1000px 0 0' };
-    default:
-      return {};
-  }
+  return getMomoMaskStyle(maskShape);
 };
 
 export const PreviewModal: React.FC<PreviewModalProps> = ({
@@ -147,10 +125,12 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                         : slot.borderRadius
                         ? `${slot.borderRadius}px`
                         : undefined,
-                    border: hasBorder ? `${slot.borderWidth}px solid ${slot.borderColor || '#ffffff'}` : undefined,
+                    boxShadow: hasBorder ? `0 0 0 ${getMomoBorderWidthPx(slot.borderWidth)}px ${slot.borderColor || '#ffffff'}` : undefined,
                     ...getMaskStyle(slot.maskShape),
                   }}
-                  className="absolute overflow-hidden bg-[#e2e3e5] flex items-center justify-center"
+                  className={`absolute overflow-hidden flex items-center justify-center ${
+                    photo ? 'bg-transparent' : 'bg-[#e2e3e5]'
+                  }`}
                 >
                   {photo && (
                     <img
@@ -219,10 +199,12 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                         : slot.borderRadius
                         ? `${slot.borderRadius}px`
                         : undefined,
-                    border: hasBorder ? `${slot.borderWidth}px solid ${slot.borderColor || '#ffffff'}` : undefined,
+                    boxShadow: hasBorder ? `0 0 0 ${getMomoBorderWidthPx(slot.borderWidth)}px ${slot.borderColor || '#ffffff'}` : undefined,
                     ...getMaskStyle(slot.maskShape),
                   }}
-                  className="absolute overflow-hidden bg-[#e2e3e5] flex items-center justify-center"
+                  className={`absolute overflow-hidden flex items-center justify-center ${
+                    photo ? 'bg-transparent' : 'bg-[#e2e3e5]'
+                  }`}
                 >
                   {photo && (
                     <img
