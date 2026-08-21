@@ -701,8 +701,25 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+
+    // 1. 如果拖拽的是素材图章，相框自身不吞噬，让页面级投放逻辑处理在落点生成独立图章
+    const stampId = e.dataTransfer.getData('text/momo-stamp-id');
+    if (stampId) {
+      return;
+    }
+
+    // 2. 遮罩投放
+    const maskId = e.dataTransfer.getData('text/momo-mask') as MaskShape;
+    if (maskId) {
+      onUpdateSlotProps?.({ maskShape: maskId });
+      return;
+    }
+
+    // 3. 照片投放
     const photoId = e.dataTransfer.getData('text/plain');
     if (photoId) {
+      // 避免误把 stamp:* 当作照片填充
+      if (photoId.startsWith('stamp:')) return;
       onDropPhoto(photoId);
     }
   };
@@ -2275,8 +2292,8 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
           {/* 分割线 */}
           <div className="w-[1px] h-4 bg-neutral-200 shrink-0 mx-0.5" />
 
-          {/* 【第 3 组：遮罩与样式装饰】 */}
-          {/* 7. 遮罩功能 (米莫 40+ 精品异形照片框) */}
+          {/* 【第 3 组：蒙版与样式装饰】 */}
+          {/* 7. 蒙版功能 (米莫精选艺术蒙版) */}
           <div className="relative">
             <button
               onClick={() => setActivePopover((prev) => (prev === 'mask' ? null : 'mask'))}
@@ -2285,16 +2302,16 @@ export const PhotoFrame: React.FC<PhotoFrameProps> = ({
                   ? 'bg-[#faf4f5] text-[#76383d] font-medium border border-[#ebdbe0]'
                   : 'hover:bg-[#faf4f5] hover:text-[#76383d] text-neutral-700'
               }`}
-              title="遮罩"
+              title="蒙版"
             >
               <IconMaskMomo className="w-5 h-5" />
             </button>
 
-            {/* 遮罩气泡弹窗 (4列网格，选定即生效并自动收起) */}
+            {/* 蒙版气泡弹窗 (4列网格，选定即生效并自动收起) */}
             {activePopover === 'mask' && (
               <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-neutral-200 p-2.5 z-[10000] w-64 animate-fade-in text-neutral-800">
                 <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100 mb-2 px-1">
-                  <span className="font-medium text-xs text-neutral-800">遮罩形状</span>
+                  <span className="font-medium text-xs text-neutral-800">选择蒙版</span>
                 </div>
                 <div className="grid grid-cols-4 gap-1.5 max-h-64 overflow-y-auto pr-1">
                   {MOMO_MASK_DEFINITIONS.map((m) => {

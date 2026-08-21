@@ -7,7 +7,7 @@
  */
 
 import { SpreadModel, PageModel, FrameSlot, BookSpec, UploadedPhoto } from '../types/editor';
-import { MOMO_MASK_DEFINITIONS } from './masks';
+import { MOMO_MASK_DEFINITIONS, normalizePathBoundingBox } from './masks';
 
 export interface PrintExportOptions {
   spread: SpreadModel;
@@ -36,11 +36,17 @@ export interface PrintExportResult {
  */
 function loadImageAsync(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
+    if (!url) {
+      reject(new Error('Empty image URL'));
+      return;
+    }
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    if (!url.startsWith('data:') && !url.startsWith('blob:')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.onload = () => resolve(img);
     img.onerror = () => {
-      // 跨域回退尝试
+      // 跨域回退尝试 (不设置 crossOrigin 重试)
       const fallbackImg = new Image();
       fallbackImg.onload = () => resolve(fallbackImg);
       fallbackImg.onerror = () => reject(new Error(`Failed to load image: ${url}`));
@@ -239,72 +245,65 @@ function setJpegDpi(blob: Blob, dpi: number = 300): Promise<Blob> {
 }
 
 /**
- * 绘制各种相框几何路径 (矩形、圆角矩形、米莫 40+ 异形遮罩)
+ * 构造相框几何路径 Path2D (矩形、圆角矩形、米莫 40+ 矢量异形遮罩)
+ * 采用归一化满幅映射算法，与编辑器前端 1:1 像素级绝对精准对齐
  */
-function traceSlotPath(
-  ctx: CanvasRenderingContext2D,
+function getSlotPath2D(
   w: number,
   h: number,
   borderRadius: number,
   maskShape?: string
-) {
+): Path2D {
+  const path = new Path2D();
+
   if (maskShape && maskShape !== 'none') {
     const maskDef = MOMO_MASK_DEFINITIONS.find((m) => m.id === maskShape);
-    if (maskDef && maskDef.pathD && typeof Path2D !== 'undefined') {
+    if (maskDef && maskDef.pathD) {
       try {
-        const path = new Path2D(maskDef.pathD);
-        ctx.save();
-        // Path2D 是基于 0~100 坐标系，将其居中缩放到 (-w/2, -h/2, w, h)
-        ctx.translate(-w / 2, -h / 2);
-        ctx.scale(w / 100, h / 100);
-        // Note: ctx.clip(path) 或者在外部使用此 path
-        // 为了兼容上下文 beginPath / stroke / clip 模式，使用标准 Path2D
-        // 在这里直接将路径添加到上下文（若支持）或创建等效变换
-        ctx.restore();
-        // 直接使用 Path2D 执行路径转换
+        // 归一化为 0~100 满幅标准包络
+        const normalizedD = normalizePathBoundingBox(maskDef.pathD, 0, 100);
+        const baseSvgPath = new Path2D(normalizedD);
+
+        // 居中变换矩阵：(0, 0) -> (-w/2, -h/2), (100, 100) -> (w/2, h/2)
         const transform = new DOMMatrix();
         transform.translateSelf(-w / 2, -h / 2);
         transform.scaleSelf(w / 100, h / 100);
-        const transformedPath = new Path2D();
-        transformedPath.addPath(path, transform);
-        (ctx as any).currentPath = transformedPath;
-        // 如果当前 context 支持，直接 beginPath 并添加
-        // standard fallback:
-        ctx.beginPath();
-        (ctx as any)._customClipPath = transformedPath;
-        return;
+
+        path.addPath(baseSvgPath, transform);
+        return path;
       } catch (e) {
-        // fallback to standard shapes below
+        // fallback to standard shapes
       }
     }
 
     if (maskShape === 'circle') {
-      ctx.beginPath();
-      ctx.arc(0, 0, Math.min(w, h) / 2, 0, Math.PI * 2);
-      return;
+      path.arc(0, 0, Math.min(w, h) / 2, 0, Math.PI * 2);
+      return path;
     }
   }
 
-  ctx.beginPath();
+  // 基础矩形 / 圆角矩形
   if (borderRadius > 0) {
-    if (typeof (ctx as any).roundRect === 'function') {
-      (ctx as any).roundRect(-w / 2, -h / 2, w, h, borderRadius);
+    if (typeof (path as any).roundRect === 'function') {
+      (path as any).roundRect(-w / 2, -h / 2, w, h, borderRadius);
     } else {
       const r = Math.min(borderRadius, w / 2, h / 2);
-      ctx.moveTo(-w / 2 + r, -h / 2);
-      ctx.lineTo(w / 2 - r, -h / 2);
-      ctx.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
-      ctx.lineTo(w / 2, h / 2 - r);
-      ctx.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
-      ctx.lineTo(-w / 2 + r, h / 2);
-      ctx.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
-      ctx.lineTo(-w / 2, -h / 2 + r);
-      ctx.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
-      ctx.closePath();
+      path.moveTo(-w / 2 + r, -h / 2);
+      path.lineTo(w / 2 - r, -h / 2);
+      path.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+      path.lineTo(w / 2, h / 2 - r);
+      path.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+      path.lineTo(-w / 2 + r, h / 2);
+      path.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+      path.lineTo(-w / 2, -h / 2 + r);
+      path.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+      path.closePath();
     }
   } else {
-    ctx.rect(-w / 2, -h / 2, w, h);
+    path.rect(-w / 2, -h / 2, w, h);
   }
+
+  return path;
 }
 
 /**
@@ -326,11 +325,21 @@ function renderPageToCanvas(
   ctx.fillStyle = page.backgroundColor || '#ffffff';
   ctx.fillRect(0, 0, pageWidthPx, pageHeightPx);
 
-  // 2. 循环绘制每个画框 / 槽位 (slots)
-  for (const slot of page.slots) {
+  // 绘制背景图（如有）
+  if (page.backgroundImage) {
+    const bgImg = loadedImages.get(page.backgroundImage);
+    if (bgImg && bgImg.naturalWidth > 0 && bgImg.naturalHeight > 0) {
+      ctx.drawImage(bgImg, 0, 0, pageWidthPx, pageHeightPx);
+    }
+  }
+
+  // 2. 按 zIndex 顺序循环绘制每个画框 / 槽位 (slots)
+  const sortedSlots = [...page.slots].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+
+  for (const slot of sortedSlots) {
     if (slot.visible === false) continue;
 
-    // 严谨计算：X 对应 pageWidthPx，Y 对应 pageHeightPx！
+    // 严谨计算：X 对应 pageWidthPx，Y 对应 pageHeightPx
     const slotX = (slot.x / 100) * pageWidthPx;
     const slotY = (slot.y / 100) * pageHeightPx;
     const slotW = (slot.width / 100) * pageWidthPx;
@@ -356,7 +365,7 @@ function renderPageToCanvas(
     }
 
     if (slot.type === 'text') {
-      // 文本元素：印刷质检规则 —— 占位提示文字绝对不打印！
+      // 文本元素：印刷质检规则 —— 占位提示文字绝对不打印
       const userText = slot.text?.trim();
       const isPlaceholder = !userText || userText === slot.placeholderText?.trim();
 
@@ -377,22 +386,23 @@ function renderPageToCanvas(
       const hasBorder = !!(slot.borderWidth && slot.borderWidth > 0);
       const scaledBorderWidth = hasBorder ? Math.max(1, (slot.borderWidth || 0) * scaleToDpi) : 0;
 
-      // 1. 照片外描边绘制 (在照片底层以 2 倍线宽向外扩展描绘，由顶层照片完美裁剪覆盖内侧，实现 100% 纯外描边)
+      // 生成带矢量遮罩的真实 Path2D 路径
+      const slotPath = getSlotPath2D(slotW, slotH, scaledBorderRadius, slot.maskShape);
+
+      // 1. 照片外描边绘制
       if (hasBorder && scaledBorderWidth > 0) {
         ctx.save();
-        traceSlotPath(ctx, slotW, slotH, scaledBorderRadius, slot.maskShape);
         ctx.lineWidth = scaledBorderWidth * 2;
         ctx.strokeStyle = slot.borderColor || '#ffffff';
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
-        ctx.stroke();
+        ctx.stroke(slotPath);
         ctx.restore();
       }
 
-      // 2. 照片内容绘制（带几何造型遮罩与裁剪，完整保留照片不被边框遮挡）
+      // 2. 照片内容绘制（必须传入 slotPath 到 clip()，确保矢量蒙版 100% 正确裁剪）
       ctx.save();
-      traceSlotPath(ctx, slotW, slotH, scaledBorderRadius, slot.maskShape);
-      ctx.clip();
+      ctx.clip(slotPath);
 
       if (imgElem && imgElem.naturalWidth > 0 && imgElem.naturalHeight > 0) {
         const nw = imgElem.naturalWidth;
@@ -446,9 +456,9 @@ function renderPageToCanvas(
           drawH
         );
       } else {
-        // 空相框：印刷成品保持纯净底色（或透明）
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(-slotW / 2, -slotH / 2, slotW, slotH);
+        // 未填充照片的空槽位，在印刷导出中呈现干净的背景
+        ctx.fillStyle = '#f8f9fa';
+        ctx.fill(slotPath);
       }
       ctx.restore();
     }
@@ -497,8 +507,13 @@ export async function exportSpreadToPrintJpg(options: PrintExportOptions): Promi
 
   onProgress?.(25, '正在预加载页面中使用的高清照片...');
 
-  // 2. 收集需要渲染的照片资产
-  const photoMap = new Map<string, UploadedPhoto>(photos.map((p) => [p.id, p]));
+  // 2. 收集需要渲染的照片资产 (同时按 id 与 assetId 建索引)
+  const photoMap = new Map<string, UploadedPhoto>();
+  photos.forEach((p) => {
+    if (p.id) photoMap.set(p.id, p);
+    if (p.assetId) photoMap.set(p.assetId, p);
+  });
+
   const neededPhotoIds = new Set<string>();
 
   const pagesToRender: { page: PageModel; isLeft: boolean }[] = [];
@@ -512,6 +527,9 @@ export async function exportSpreadToPrintJpg(options: PrintExportOptions): Promi
   }
 
   for (const { page } of pagesToRender) {
+    if (page.backgroundImage) {
+      neededPhotoIds.add(page.backgroundImage);
+    }
     for (const slot of page.slots) {
       const pid = slot.photoId || slot.assetId;
       if (pid) neededPhotoIds.add(pid);
@@ -526,13 +544,18 @@ export async function exportSpreadToPrintJpg(options: PrintExportOptions): Promi
   await Promise.all(
     Array.from(neededPhotoIds).map(async (pid) => {
       const photoObj = photoMap.get(pid);
-      if (!photoObj) return;
-      const imageUrl = photoObj.originalUrl || photoObj.url || photoObj.thumbUrl;
-      try {
-        const img = await loadImageAsync(imageUrl);
-        loadedImages.set(pid, img);
-      } catch (err) {
-        console.warn(`Print engine warning: failed to load full image for photo ${pid}`, err);
+      const imageUrl = photoObj
+        ? (photoObj.originalUrl || photoObj.url || photoObj.thumbUrl)
+        : pid; // 如果 pid 本身就是 URL / DataURL
+      if (imageUrl) {
+        try {
+          const img = await loadImageAsync(imageUrl);
+          loadedImages.set(pid, img);
+          if (photoObj?.id) loadedImages.set(photoObj.id, img);
+          if (photoObj?.assetId) loadedImages.set(photoObj.assetId, img);
+        } catch (err) {
+          console.warn(`Print engine warning: failed to load image for ${pid}`, err);
+        }
       }
       loadedCount++;
       const pct = Math.round(25 + (loadedCount / Math.max(1, totalToLoad)) * 40);

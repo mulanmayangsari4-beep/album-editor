@@ -21,6 +21,7 @@ import {
   ProductSpec,
   SidebarTab,
   FrameSlot,
+  MaskShape,
   SpacingConfig,
   ProjectDocument,
   CURRENT_SCHEMA_VERSION,
@@ -30,7 +31,8 @@ import {
   migrateProjectDocument,
   normalizeSlot,
 } from './utils/projectSerializer';
-import { MomoGlobalClipPaths } from './utils/masks';
+import { MomoGlobalClipPaths, MOMO_MASK_DEFINITIONS } from './utils/masks';
+import { PresetStamp, PRESET_STAMPS, svgToDataUrl } from './data/stamps';
 
 export default function App() {
   const [bookSpec, setBookSpec] = useState<BookSpec>(DEFAULT_BOOK_SPEC);
@@ -1050,6 +1052,235 @@ export default function App() {
     pushHistory(nextSpreads);
   };
 
+  // 应用蒙版到画框 (从左侧蒙版面板或快捷栏触发)
+  const handleApplyMask = (maskId: MaskShape) => {
+    let targetPageId: string | null = null;
+    let targetSlotId: string | null = selectedSlotId;
+
+    const currentSpread = spreads[currentSpreadIndex];
+    if (targetSlotId && currentSpread) {
+      if (currentSpread.leftPage.slots.some((s) => s.id === targetSlotId)) {
+        targetPageId = currentSpread.leftPage.id;
+      } else if (currentSpread.rightPage.slots.some((s) => s.id === targetSlotId)) {
+        targetPageId = currentSpread.rightPage.id;
+      }
+    }
+
+    // 如果未选定画框，但在当前活动页上有画框，则自动选取第 1 个画框应用
+    if (!targetSlotId || !targetPageId) {
+      const activeSidePage = (activeSide === 'right') ? currentSpread.rightPage : currentSpread.leftPage;
+      if (activeSidePage.slots.length > 0) {
+        targetPageId = activeSidePage.id;
+        targetSlotId = activeSidePage.slots[0].id;
+        setSelectedSlotId(targetSlotId);
+        setSelectedSlotIds([targetSlotId]);
+      } else {
+        // 如果当前页没有画框，自动在当前页新增一个带该蒙版的画框
+        const newSlot: FrameSlot = normalizeSlot({
+          id: `slot_mask_${Date.now()}`,
+          type: 'photo',
+          x: 25,
+          y: 25,
+          width: 50,
+          height: 50,
+          maskShape: maskId,
+        }, bookSpec.widthMm, bookSpec.heightMm);
+
+        const pageToAddTo = (activeSide === 'right') ? 'rightPage' : 'leftPage';
+        const nextSpreads = spreads.map((spread, idx) => {
+          if (idx !== currentSpreadIndex) return spread;
+          return {
+            ...spread,
+            [pageToAddTo]: {
+              ...spread[pageToAddTo],
+              slots: [...spread[pageToAddTo].slots, newSlot],
+            },
+          };
+        });
+
+        setSpreads(nextSpreads);
+        pushHistory(nextSpreads);
+        setSelectedSlotId(newSlot.id);
+        setSelectedSlotIds([newSlot.id]);
+        const maskDef = MOMO_MASK_DEFINITIONS.find((m) => m.id === maskId);
+        setToastMessage(`已新建「${maskDef?.name || maskId}」蒙版画框`);
+        setTimeout(() => setToastMessage(null), 2000);
+        return;
+      }
+    }
+
+    if (targetPageId && targetSlotId) {
+      handleUpdateSlotProps(targetPageId, targetSlotId, { maskShape: maskId });
+      const maskDef = MOMO_MASK_DEFINITIONS.find((m) => m.id === maskId);
+      setToastMessage(`已应用「${maskDef?.name || maskId}」蒙版`);
+      setTimeout(() => setToastMessage(null), 2000);
+    }
+  };
+
+  // 添加图章到当前跨页（左页或右页）
+  const handleAddStamp = (stamp: PresetStamp) => {
+    const currentSpread = spreads[currentSpreadIndex];
+    if (!currentSpread) return;
+
+    let targetSide: 'left' | 'right' = activeSide || 'left';
+
+    // 如果当前选中的画框在某页，则优先添加在该页
+    if (selectedSlotId) {
+      if (currentSpread.leftPage.slots.some((s) => s.id === selectedSlotId)) {
+        targetSide = 'left';
+      } else if (currentSpread.rightPage.slots.some((s) => s.id === selectedSlotId)) {
+        targetSide = 'right';
+      }
+    }
+
+    const dataUrl = svgToDataUrl(stamp.svgContent);
+    const stampPhotoId = `stamp_asset_${stamp.id}`;
+
+    // 将图章注册为虚拟资产，设置 isSystemStamp: true，彻底与照片托盘解耦
+    const stampPhoto: UploadedPhoto = {
+      id: stampPhotoId,
+      assetId: stampPhotoId,
+      name: stamp.name,
+      url: dataUrl,
+      thumbUrl: dataUrl,
+      previewUrl: dataUrl,
+      originalUrl: dataUrl,
+      thumbnailUrl: dataUrl,
+      naturalWidth: 400,
+      naturalHeight: 400,
+      fileSize: 1024,
+      usedCount: 1,
+      aspectRatio: 'square',
+      createdAt: Date.now(),
+      isSystemStamp: true,
+    };
+
+    setPhotos((prev) => {
+      const exists = prev.some((p) => p.id === stampPhotoId);
+      if (exists) return prev;
+      return [stampPhoto, ...prev];
+    });
+
+    const wPercent = stamp.defaultWidthPercent || 22;
+    const hPercent = stamp.defaultHeightPercent || 22;
+    const targetPageSlots = targetSide === 'left' ? currentSpread.leftPage.slots : currentSpread.rightPage.slots;
+    const maxZ = targetPageSlots.reduce((max, s) => Math.max(max, s.zIndex || 1), 1);
+
+    const newSlot: FrameSlot = normalizeSlot({
+      id: `slot_stamp_${Date.now()}`,
+      type: 'photo',
+      x: Number((Math.max(5, 50 - wPercent / 2 + (Math.random() * 6 - 3))).toFixed(2)),
+      y: Number((Math.max(5, 50 - hPercent / 2 + (Math.random() * 6 - 3))).toFixed(2)),
+      width: wPercent,
+      height: hPercent,
+      photoId: stampPhotoId,
+      assetId: stampPhotoId,
+      fitMode: 'contain',
+      zIndex: maxZ + 1,
+      crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
+    }, bookSpec.widthMm, bookSpec.heightMm);
+
+    const isLeft = targetSide === 'left';
+    const nextSpreads = spreads.map((spread, idx) => {
+      if (idx !== currentSpreadIndex) return spread;
+      return {
+        ...spread,
+        [isLeft ? 'leftPage' : 'rightPage']: {
+          ...spread[isLeft ? 'leftPage' : 'rightPage'],
+          slots: [...spread[isLeft ? 'leftPage' : 'rightPage'].slots, newSlot],
+        },
+      };
+    });
+
+    setSpreads(nextSpreads);
+    pushHistory(nextSpreads);
+    setSelectedSlotId(newSlot.id);
+    setSelectedSlotIds([newSlot.id]);
+    setActiveSide(targetSide);
+    setToastMessage(`已将「${stamp.name}」图章添加至${isLeft ? '左' : '右'}页`);
+    setTimeout(() => setToastMessage(null), 2000);
+  };
+
+  // 拖拽图章到画布精准落点放置
+  const handleAddStampAtPosition = (pageId: string, stampId: string, positionPercent: { x: number; y: number }) => {
+    const stamp = PRESET_STAMPS.find((s) => s.id === stampId);
+    if (!stamp) return;
+
+    const currentSpread = spreads[currentSpreadIndex];
+    if (!currentSpread) return;
+
+    const isLeft = currentSpread.leftPage.id === pageId;
+    const targetPage = isLeft ? currentSpread.leftPage : currentSpread.rightPage;
+
+    const dataUrl = svgToDataUrl(stamp.svgContent);
+    const stampPhotoId = `stamp_asset_${stamp.id}`;
+
+    const stampPhoto: UploadedPhoto = {
+      id: stampPhotoId,
+      assetId: stampPhotoId,
+      name: stamp.name,
+      url: dataUrl,
+      thumbUrl: dataUrl,
+      previewUrl: dataUrl,
+      originalUrl: dataUrl,
+      thumbnailUrl: dataUrl,
+      naturalWidth: 400,
+      naturalHeight: 400,
+      fileSize: 1024,
+      usedCount: 1,
+      aspectRatio: 'square',
+      createdAt: Date.now(),
+      isSystemStamp: true,
+    };
+
+    setPhotos((prev) => {
+      const exists = prev.some((p) => p.id === stampPhotoId);
+      if (exists) return prev;
+      return [stampPhoto, ...prev];
+    });
+
+    const wPercent = stamp.defaultWidthPercent || 22;
+    const hPercent = stamp.defaultHeightPercent || 22;
+    const maxZ = targetPage.slots.reduce((max, s) => Math.max(max, s.zIndex || 1), 1);
+
+    // 将图章中心对齐到鼠标释放位置，并限制在安全边距内
+    const leftX = Math.max(2, Math.min(98 - wPercent, positionPercent.x - wPercent / 2));
+    const topY = Math.max(2, Math.min(98 - hPercent, positionPercent.y - hPercent / 2));
+
+    const newSlot: FrameSlot = normalizeSlot({
+      id: `slot_stamp_${Date.now()}`,
+      type: 'photo',
+      x: Number(leftX.toFixed(2)),
+      y: Number(topY.toFixed(2)),
+      width: wPercent,
+      height: hPercent,
+      photoId: stampPhotoId,
+      assetId: stampPhotoId,
+      fitMode: 'contain',
+      zIndex: maxZ + 1,
+      crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
+    }, bookSpec.widthMm, bookSpec.heightMm);
+
+    const nextSpreads = spreads.map((spread, idx) => {
+      if (idx !== currentSpreadIndex) return spread;
+      return {
+        ...spread,
+        [isLeft ? 'leftPage' : 'rightPage']: {
+          ...spread[isLeft ? 'leftPage' : 'rightPage'],
+          slots: [...spread[isLeft ? 'leftPage' : 'rightPage'].slots, newSlot],
+        },
+      };
+    });
+
+    setSpreads(nextSpreads);
+    pushHistory(nextSpreads);
+    setSelectedSlotId(newSlot.id);
+    setSelectedSlotIds([newSlot.id]);
+    setActiveSide(isLeft ? 'left' : 'right');
+    setToastMessage(`已将「${stamp.name}」放置在${isLeft ? '左' : '右'}页`);
+    setTimeout(() => setToastMessage(null), 2000);
+  };
+
   // 画框一键满屏 (占满整页 100% 宽高)
   const handleMakeFullScreen = (pageId: string, slotId: string) => {
     const nextSpreads = spreads.map((spread) => {
@@ -1660,6 +1891,8 @@ export default function App() {
             onApplyLayoutToCurrentPage={handleApplyLayoutToCurrentPage}
             onApplySpreadLayout={handleApplySpreadLayout}
             onApplyBackgroundColor={handleApplyBackgroundColor}
+            onApplyMask={handleApplyMask}
+            onAddStamp={handleAddStamp}
             currentPageNumber={{
               left: currentSpread.leftPage.pageNumber,
               right: currentSpread.rightPage.pageNumber,
@@ -1712,6 +1945,7 @@ export default function App() {
             setIsSidebarCollapsed(false);
           }}
           onClearPagePhotos={handleClearPagePhotos}
+          onAddStampAtPosition={handleAddStampAtPosition}
         />
 
         {/* 最右侧页面管理大纲栏 (1:1 整合原底部全部功能 + 纵向单双列页面列表) */}

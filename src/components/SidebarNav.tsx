@@ -19,6 +19,39 @@ interface SidebarNavProps {
   onToggleCollapse: () => void;
 }
 
+export const IconStampSidebar: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    {/* 经典贴纸/图章图标：圆角贴纸带右下角翻折卷边 (1:1 还原用户参考图) */}
+    <path d="M 21 11.5 A 9.2 9.2 0 1 0 11.5 21" />
+    <path d="M 11.5 21 C 12 16.2 16.2 12 21 11.5" />
+    <path d="M 12.6 20.4 C 13.6 16.8 16.8 13.6 20.4 12.6" />
+  </svg>
+);
+
+export const IconMaskSidebar: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <rect x="3" y="3" width="18" height="18" rx="3.5" />
+    <circle cx="12" cy="12" r="5" />
+    <path d="M7 7 L9 9 M15 15 L17 17 M7 17 L9 15 M15 9 L17 7" strokeWidth="1.2" />
+  </svg>
+);
+
 export const SidebarNav: React.FC<SidebarNavProps> = ({
   activeTab,
   onSelectTab,
@@ -29,8 +62,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     { id: 'photos', label: '照片', icon: <ImageIcon className="w-4 h-4" /> },
     { id: 'design', label: '设计', icon: <Palette className="w-4 h-4" /> },
     { id: 'layouts', label: '版式', icon: <LayoutGrid className="w-4 h-4" /> },
+    { id: 'elements', label: '图章', icon: <IconStampSidebar className="w-4 h-4" /> },
+    { id: 'masks', label: '蒙版', icon: <IconMaskSidebar className="w-4 h-4" /> },
     { id: 'backgrounds', label: '背景', icon: <Square className="w-4 h-4" /> },
-    { id: 'elements', label: '素材', icon: <Sparkles className="w-4 h-4" /> },
     { id: 'themes', label: '主题', icon: <Bookmark className="w-4 h-4" /> },
     { id: 'import', label: '导入', icon: <UploadCloud className="w-4 h-4" /> },
   ];

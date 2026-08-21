@@ -34,6 +34,10 @@ import {
 import { processLocalImageFile, formatBytes, formatDateTime } from '../utils/imageUtils';
 import { PhotoDetailModal } from './PhotoDetailModal';
 import { PhotoSourceModal, PhotoSourceTab } from './PhotoSourceModal';
+import { MasksPanel } from './MasksPanel';
+import { StampsPanel } from './StampsPanel';
+import { MaskShape } from '../types/editor';
+import { PresetStamp } from '../data/stamps';
 
 interface PhotoTrayProps {
   activeTab: SidebarTab | null;
@@ -47,6 +51,8 @@ interface PhotoTrayProps {
   onApplyLayoutToCurrentPage: (slots: FrameSlot[], targetPage: 'left' | 'right' | 'both') => void;
   onApplySpreadLayout: (leftSlots: FrameSlot[], rightSlots: FrameSlot[]) => void;
   onApplyBackgroundColor: (color: string, targetPage: 'left' | 'right' | 'both') => void;
+  onApplyMask?: (maskId: MaskShape) => void;
+  onAddStamp?: (stamp: PresetStamp) => void;
   currentPageNumber: { left: number; right: number };
   currentLeftSlots?: FrameSlot[];
   currentRightSlots?: FrameSlot[];
@@ -73,6 +79,8 @@ export const PhotoTray: React.FC<PhotoTrayProps> = ({
   onApplyLayoutToCurrentPage,
   onApplySpreadLayout,
   onApplyBackgroundColor,
+  onApplyMask,
+  onAddStamp,
   currentPageNumber,
   currentLeftSlots,
   currentRightSlots,
@@ -231,8 +239,9 @@ export const PhotoTray: React.FC<PhotoTrayProps> = ({
     }
   };
 
-  // 过滤照片列表
+  // 过滤照片列表 (彻底排除系统素材与图章，确保照片区仅展示用户上传的照片)
   const filteredPhotos = photos.filter((p) => {
+    if (p.isSystemStamp || p.id.startsWith('stamp_asset_')) return false;
     if (hideUsed && p.usedCount > 0) return false;
     if (onlyVideo) {
       return (
@@ -1232,7 +1241,23 @@ export const PhotoTray: React.FC<PhotoTrayProps> = ({
         </div>
       )}
 
-      {/* ===== TAB 3: 背景面板 ===== */}
+      {/* ===== TAB 3: 蒙版素材库 ===== */}
+      {activeTab === 'masks' && (
+        <MasksPanel
+          currentSelectedSlot={
+            [...(currentLeftSlots || []), ...(currentRightSlots || [])].find(
+              (s) => s.id === selectedSlotId
+            ) || null
+          }
+          onApplyMask={(maskId) => {
+            if (onApplyMask) {
+              onApplyMask(maskId);
+            }
+          }}
+        />
+      )}
+
+      {/* ===== TAB 4: 背景面板 ===== */}
       {activeTab === 'backgrounds' && (
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="p-3 border-b border-[#e5e7eb] bg-white">
@@ -1260,11 +1285,21 @@ export const PhotoTray: React.FC<PhotoTrayProps> = ({
         </div>
       )}
 
-      {/* ===== TAB 4: 设计/素材/主题/导入面板 ===== */}
-      {['design', 'elements', 'themes', 'import'].includes(activeTab) && (
+      {/* ===== TAB 4: 图章面板 ===== */}
+      {activeTab === 'elements' && (
+        <StampsPanel
+          onAddStamp={(stamp) => onAddStamp?.(stamp)}
+          activeSide={activeSide}
+          onSelectSide={onSelectSide}
+          currentPageNumber={currentPageNumber}
+        />
+      )}
+
+      {/* ===== TAB 5: 设计/主题/导入面板 ===== */}
+      {['design', 'themes', 'import'].includes(activeTab || '') && (
         <div className="flex-1 p-4 flex flex-col justify-center items-center text-center space-y-2 text-neutral-500">
           <Sparkles className="w-8 h-8 text-neutral-400" />
-          <p className="text-xs font-medium text-neutral-700">精选素材库</p>
+          <p className="text-xs font-medium text-neutral-700">精选素材与主题库</p>
           <p className="text-[11px] text-neutral-500">
             支持一键添加文字贴纸、旅行印章与文艺手绘元素，为相册锦上添花。
           </p>

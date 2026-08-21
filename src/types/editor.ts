@@ -293,6 +293,9 @@ export interface PhotoAsset {
 
   // AI 视觉元数据
   aiAnalysis?: PhotoAnalysisResult; // 厂商中立的统一 AI 视觉分析元数据
+
+  // 系统预置素材/图章标记 (用于与用户上传照片彻底解耦)
+  isSystemStamp?: boolean;
 }
 
 // 保持对 UploadedPhoto 的别名，确保项目现有调用 100% 兼容
@@ -369,6 +372,7 @@ export type SidebarTab =
   | 'photos'
   | 'design'
   | 'layouts'
+  | 'masks'
   | 'backgrounds'
   | 'elements'
   | 'themes'

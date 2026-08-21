@@ -63,6 +63,7 @@ interface SpreadCanvasProps {
   onSwapSpreadPagePhotos?: () => void;
   onOpenLayoutDrawer: (page: 'left' | 'right') => void;
   onClearPagePhotos: (page: 'left' | 'right') => void;
+  onAddStampAtPosition?: (pageId: string, stampId: string, positionPercent: { x: number; y: number }) => void;
 }
 
 export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
@@ -104,6 +105,7 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
   onSwapSpreadPagePhotos,
   onOpenLayoutDrawer,
   onClearPagePhotos,
+  onAddStampAtPosition,
 }) => {
   const photoMap = new Map<string, UploadedPhoto>(photos.map((p) => [p.id, p]));
   
@@ -117,9 +119,9 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
       const { clientWidth, clientHeight } = containerRef.current;
       if (clientWidth <= 0 || clientHeight <= 0) return;
 
-      // 留出适度安全边距 (左右 56px，上下留出底部浮动控制栏约 96px 边距)
-      const availableWidth = Math.max(200, clientWidth - 56);
-      const availableHeight = Math.max(150, clientHeight - 96);
+      // 留出充足安全边距 (左右 48px，上下留出底部浮动控制栏与顶部间距约 110px 边距，确保默认 100% 缩放下严丝合缝无滚动条)
+      const availableWidth = Math.max(200, clientWidth - 48);
+      const availableHeight = Math.max(150, clientHeight - 112);
       const bookWidth = 920;
       const bookHeight = 460;
 
@@ -571,7 +573,9 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
           onSelectSide(null);
         }
       }}
-      className={`flex-1 bg-[#ededf0] overflow-auto flex items-center justify-center p-4 md:p-8 select-none relative ${
+      className={`flex-1 bg-[#ededf0] flex items-center justify-center p-2 select-none relative ${
+        (viewConfig.zoomPercent || 100) > 100 ? 'overflow-auto' : 'overflow-hidden'
+      } ${
         isPanning
           ? 'cursor-grabbing'
           : isHandToolActive || isSpacePressed
@@ -609,6 +613,22 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
             id={`page-left-${spread.leftPage.id}`}
             onMouseDown={() => {
               onSelectSide('left');
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const stampId = e.dataTransfer.getData('text/momo-stamp-id');
+              if (stampId && onAddStampAtPosition) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const dropX = e.clientX - rect.left;
+                const dropY = e.clientY - rect.top;
+                const xPercent = (dropX / rect.width) * 100;
+                const yPercent = (dropY / rect.height) * 100;
+                onAddStampAtPosition(spread.leftPage.id, stampId, { x: xPercent, y: yPercent });
+              }
             }}
             onClick={(e) => {
               if (e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -793,6 +813,22 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
             id={`page-right-${spread.rightPage.id}`}
             onMouseDown={() => {
               onSelectSide('right');
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const stampId = e.dataTransfer.getData('text/momo-stamp-id');
+              if (stampId && onAddStampAtPosition) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const dropX = e.clientX - rect.left;
+                const dropY = e.clientY - rect.top;
+                const xPercent = (dropX / rect.width) * 100;
+                const yPercent = (dropY / rect.height) * 100;
+                onAddStampAtPosition(spread.rightPage.id, stampId, { x: xPercent, y: yPercent });
+              }
             }}
             onClick={(e) => {
               if (e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -1287,24 +1323,6 @@ export const SpreadCanvas: React.FC<SpreadCanvasProps> = ({
         >
           <Hand className="w-5 h-5" />
         </button>
-
-        {/* 极速多页编辑按钮 (1:1 还原用户上传图 1 的酒红微标与图邦主多页总览入口) */}
-        {onOpenMultiPage && (
-          <button
-            type="button"
-            id="btn-bottom-multi-page-view"
-            onClick={onOpenMultiPage}
-            className="h-12 px-3 bg-white hover:bg-neutral-50 active:bg-neutral-100 border border-[#dadce0] rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.08)] flex items-center space-x-2 transition-all cursor-pointer group"
-            title="打开多页编辑与总览视图 (图邦主多页平铺模式)"
-          >
-            <div className="w-8 h-8 rounded-lg bg-[#76383d] text-white flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
-              <IconMultiPageGrid className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-xs font-semibold text-neutral-700 group-hover:text-[#76383d] transition-colors pr-1">
-              多页编辑
-            </span>
-          </button>
-        )}
       </div>
     </main>
   );
