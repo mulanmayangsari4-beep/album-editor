@@ -1,11 +1,14 @@
 import {
   ProjectDocument,
   SpreadModel,
+  PageModel,
   UploadedPhoto,
   ProductSpec,
+  ProductSpecSnapshot,
   OrderSnapshot,
   CURRENT_SCHEMA_VERSION,
   FrameSlot,
+  PageFaceType,
 } from '../types/editor';
 
 /**
@@ -46,69 +49,165 @@ export function getSlotPhysicalMm(
 
 /**
  * 数据迁移与向下兼容装载器 (Schema Migration Engine)
- * 当读取未来或过去的旧版本 JSON 存档时，执行渐进式数据补全与标准化
+ * 
+ * 核心架构保障：
+ * 1. pages 作为跨产品族唯一的 Source of Truth 页面列表。
+ * 2. 自动补充 ProductSpecSnapshot 隔离历史产品修改。
+ * 3. 自动保留与提取 designAssets 清单。
+ * 4. 自动为旧工程补充解耦的 pageSpec, coverSpec, bindingSpec, exportSpec 与 capabilities。
  */
 export function migrateProjectDocument(rawJson: unknown): ProjectDocument {
   const data = (rawJson || {}) as Record<string, any>;
 
-  const version = typeof data.schemaVersion === 'number' ? data.schemaVersion : 1;
-
   // 1. 规范化 Project 基础字段
   const projectId = data.id || `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const title = data.name || data.title || '我的照片书';
+  const title = data.name || data.title || '我的设计工程';
   const createdAt = data.createdAt || Date.now();
   const updatedAt = data.updatedAt || Date.now();
 
-  // 2. 规范化商品规格 spec
+  // 2. 规范化商品规格 spec，构建解耦的全新规格体系
   const rawSpec = data.productSpec || data.spec || {};
+  const widthMm = rawSpec.pageSpec?.widthMm || rawSpec.widthMm || 200;
+  const heightMm = rawSpec.pageSpec?.heightMm || rawSpec.heightMm || 200;
+  const bleedMm = typeof rawSpec.pageSpec?.bleedMm === 'number'
+    ? rawSpec.pageSpec.bleedMm
+    : (typeof rawSpec.bleedMm === 'number' ? rawSpec.bleedMm : 3);
+  const safeMarginMm = typeof rawSpec.pageSpec?.safeMarginMm === 'number'
+    ? rawSpec.pageSpec.safeMarginMm
+    : (typeof rawSpec.safeMarginMm === 'number' ? rawSpec.safeMarginMm : 6);
+
   const productSpec: ProductSpec = {
     id: rawSpec.id || 'square_8inch_book',
+    version: typeof rawSpec.version === 'number' ? rawSpec.version : 1,
     productType: rawSpec.productType || 'photobook',
     name: rawSpec.name || '完美好翻书-方8寸',
     categoryName: rawSpec.categoryName || '照片书',
-    widthMm: rawSpec.widthMm || 200,
-    heightMm: rawSpec.heightMm || 200,
-    bleedMm: typeof rawSpec.bleedMm === 'number' ? rawSpec.bleedMm : 3,
-    safeMarginMm: typeof rawSpec.safeMarginMm === 'number' ? rawSpec.safeMarginMm : 6,
+    description: rawSpec.description || '经典方本照片书',
+    sizeCategory: rawSpec.sizeCategory || `${widthMm}x${heightMm}mm`,
+    layoutMode: rawSpec.layoutMode || 'dual_spread',
+    
+    // 独立解耦的内页物理规格
+    pageSpec: {
+      widthMm,
+      heightMm,
+      bleedMm,
+      safeMarginMm,
+      innerGutterSafeMarginMm: rawSpec.pageSpec?.innerGutterSafeMarginMm ?? 5,
+    },
+
+    // 独立封面规格
+    coverSpec: rawSpec.coverSpec || {
+      materialType: rawSpec.coverType === 'hardcover' ? 'hardcover_board' : 'photo_paper',
+      designable: true,
+      widthMm,
+      heightMm,
+      bleedMm,
+      safeMarginMm,
+      spineRule: {
+        type: rawSpec.binding?.spineWidthMm ? 'fixed' : 'none',
+        fixedWidthMm: rawSpec.binding?.spineWidthMm || 5,
+      },
+    },
+
+    // 独立装订规格
+    bindingSpec: rawSpec.bindingSpec || {
+      bindingType: rawSpec.binding?.type === 'layflat_seamless' ? 'layflat' : 'perfect_binding',
+      name: rawSpec.binding?.type === 'layflat_seamless' ? '蝴蝶对裱平摊' : '胶装',
+      bindingEdge: rawSpec.binding?.bindingEdge || 'left',
+      gutterHingeMm: rawSpec.binding?.gutterSafetyMm || 5,
+      isLayflat: rawSpec.binding?.type === 'layflat_seamless' || rawSpec.binding?.type === 'glue_layflat',
+    },
+
+    // 独立导出规格
+    exportSpec: rawSpec.exportSpec || {
+      dpi: 300,
+      colorSpace: 'RGB',
+      exportFormat: 'zip_jpg',
+      includeBleedInExport: true,
+      renderCropMarks: true,
+    },
+
+    // 独立能力矩阵
+    capabilities: rawSpec.capabilities || {
+      allowCoverDesign: true,
+      allowText: true,
+      allowSticker: true,
+      allowAI: true,
+      allowMultiPhotoLayout: true,
+      allowPageAddDelete: true,
+      allowMaskShape: true,
+      allowBackgroundChange: true,
+    },
+
     defaultPages: rawSpec.defaultPages || 20,
     minPages: rawSpec.minPages || 16,
     maxPages: rawSpec.maxPages || 80,
     pageStep: rawSpec.pageStep || 2,
     canvasPixelSize: rawSpec.canvasPixelSize || 2027,
-    layoutMode: rawSpec.layoutMode || 'dual_spread',
+
+    // 兼容老代码顶层字段
+    widthMm,
+    heightMm,
+    bleedMm,
+    safeMarginMm,
+    binding: rawSpec.binding || {
+      type: 'glue_layflat',
+      spineWidthMm: 5,
+      gutterSafetyMm: 5,
+      bindingEdge: 'left',
+    },
+    allowedElementTypes: rawSpec.allowedElementTypes || ['photo', 'text', 'stamp', 'shape'],
+    coverType: rawSpec.coverType || 'softcover',
   };
 
-  // 3. 规范化跨页与元素 (补全 assetId, opacity, locked, visible 等通用属性)
-  const spreads: SpreadModel[] = Array.isArray(data.spreads)
-    ? data.spreads.map((spread: any, sIdx: number) => ({
-        id: spread.id || `spread_${sIdx}`,
-        spreadIndex: typeof spread.spreadIndex === 'number' ? spread.spreadIndex : sIdx,
-        type: spread.type || 'spread',
-        name: spread.name,
-        leftPage: {
-          id: spread.leftPage?.id || `page_L_${sIdx}`,
-          pageNumber: spread.leftPage?.pageNumber ?? sIdx * 2,
-          isLeft: true,
-          backgroundColor: spread.leftPage?.backgroundColor || '#ffffff',
-          backgroundImage: spread.leftPage?.backgroundImage,
-          slots: Array.isArray(spread.leftPage?.slots)
-            ? spread.leftPage.slots.map((s: any) => normalizeSlot(s, productSpec.widthMm, productSpec.heightMm))
-            : [],
-        },
-        rightPage: {
-          id: spread.rightPage?.id || `page_R_${sIdx}`,
-          pageNumber: spread.rightPage?.pageNumber ?? sIdx * 2 + 1,
-          isLeft: false,
-          backgroundColor: spread.rightPage?.backgroundColor || '#ffffff',
-          backgroundImage: spread.rightPage?.backgroundImage,
-          slots: Array.isArray(spread.rightPage?.slots)
-            ? spread.rightPage.slots.map((s: any) => normalizeSlot(s, productSpec.widthMm, productSpec.heightMm))
-            : [],
-        },
-      }))
-    : [];
+  // 3. 规范化 pages 与 spreads (建立 pages 唯一 Source of Truth)
+  let pages: PageModel[] = [];
+  let spreads: SpreadModel[] = [];
 
-  // 4. 规范化照片资产库 (保证 assetId 唯一性，保留原图/缩略图分层与 AI 视觉分析元数据)
+  if (Array.isArray(data.pages) && data.pages.length > 0) {
+    // 优先读取新格式 pages 数组
+    pages = data.pages.map((p: any, pIdx: number) => normalizePage(p, pIdx, productSpec));
+  } else if (Array.isArray(data.spreads) && data.spreads.length > 0) {
+    // 降级从老版本 spreads 数组解构出扁平化 pages
+    data.spreads.forEach((spread: any, sIdx: number) => {
+      if (spread.leftPage) {
+        pages.push(normalizePage(spread.leftPage, sIdx * 2, productSpec, 'inside_left', true));
+      }
+      if (spread.rightPage) {
+        pages.push(normalizePage(spread.rightPage, sIdx * 2 + 1, productSpec, 'inside_right', false));
+      }
+    });
+  }
+
+  // 根据 pages 构建视图层 spreads 兼容镜像
+  if (Array.isArray(data.spreads) && data.spreads.length > 0) {
+    spreads = data.spreads.map((spread: any, sIdx: number) => ({
+      id: spread.id || `spread_${sIdx}`,
+      spreadIndex: typeof spread.spreadIndex === 'number' ? spread.spreadIndex : sIdx,
+      type: spread.type || 'spread',
+      name: spread.name,
+      isCover: spread.isCover,
+      leftPage: normalizePage(spread.leftPage || {}, sIdx * 2, productSpec, 'inside_left', true),
+      rightPage: normalizePage(spread.rightPage || {}, sIdx * 2 + 1, productSpec, 'inside_right', false),
+    }));
+  } else {
+    // 若仅有 pages，则按成对规则派生 spreads
+    for (let i = 0; i < pages.length; i += 2) {
+      const leftPage = pages[i] || normalizePage({}, i, productSpec, 'inside_left', true);
+      const rightPage = pages[i + 1] || normalizePage({}, i + 1, productSpec, 'inside_right', false);
+      const sIdx = Math.floor(i / 2);
+      spreads.push({
+        id: `spread_${sIdx}`,
+        spreadIndex: sIdx,
+        type: sIdx === 0 ? 'cover' : 'spread',
+        isCover: sIdx === 0,
+        leftPage,
+        rightPage,
+      });
+    }
+  }
+
+  // 4. 规范化照片资产库 (保持 assetId 映射)
   const photos: UploadedPhoto[] = Array.isArray(data.photos)
     ? data.photos.map((p: any) => ({
         id: p.id || p.assetId || `photo_${Math.random().toString(36).substring(2, 8)}`,
@@ -131,21 +230,76 @@ export function migrateProjectDocument(rawJson: unknown): ProjectDocument {
         uploadStatus: p.uploadStatus || 'local',
         storageKey: p.storageKey,
         aiAnalysis: p.aiAnalysis,
+        isSystemStamp: p.isSystemStamp,
       }))
     : [];
+
+  // 5. 规范化设计素材引用清单 (designAssets)
+  const designAssets = Array.isArray(data.designAssets) ? data.designAssets : [];
+
+  // 6. 规范化产品规格快照 (ProductSpecSnapshot)
+  const productSpecSnapshot: ProductSpecSnapshot = data.productSpecSnapshot || {
+    snapshotId: `spec_snap_${productSpec.id}_v${productSpec.version}`,
+    productSpecId: productSpec.id,
+    version: productSpec.version,
+    frozenAt: createdAt,
+    spec: JSON.parse(JSON.stringify(productSpec)),
+  };
 
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     id: projectId,
     title,
     productSpec,
+    productSpecSnapshot,
+    pages,
     spreads,
     photos,
+    designAssets,
     createdAt,
     updatedAt,
   };
 }
 
+/**
+ * 规范化单个页面模型
+ */
+export function normalizePage(
+  p: any,
+  index: number,
+  spec: ProductSpec,
+  defaultFace: PageFaceType = 'inside_left',
+  defaultIsLeft: boolean = true
+): PageModel {
+  const isLeft = p.isLeft !== undefined ? Boolean(p.isLeft) : defaultIsLeft;
+  const faceType: PageFaceType = p.faceType || (index === 0 ? 'cover_front' : (isLeft ? 'inside_left' : 'inside_right'));
+  const widthMm = spec.pageSpec?.widthMm || spec.widthMm || 200;
+  const heightMm = spec.pageSpec?.heightMm || spec.heightMm || 200;
+
+  const rawSlots = Array.isArray(p.slots) ? p.slots : (Array.isArray(p.elements) ? p.elements : []);
+  const normalizedSlots = rawSlots.map((s: any) => normalizeSlot(s, widthMm, heightMm));
+
+  return {
+    id: p.id || `page_${index}_${Math.random().toString(36).substring(2, 6)}`,
+    pageNumber: typeof p.pageNumber === 'number' ? p.pageNumber : index,
+    faceType,
+    isLeft,
+    backgroundColor: p.backgroundColor || '#ffffff',
+    backgroundImage: p.backgroundImage,
+    backgroundAssetId: p.backgroundAssetId,
+    backgroundScaleMode: p.backgroundScaleMode || 'cover',
+    backgroundOpacity: p.backgroundOpacity,
+    slots: normalizedSlots,
+    elements: normalizedSlots,
+    name: p.name,
+    locked: Boolean(p.locked),
+    customData: p.customData,
+  };
+}
+
+/**
+ * 规范化单个元素模型 (毫米与百分比双向校准)
+ */
 export function normalizeSlot(slot: any, pageWidthMm: number = 200, pageHeightMm: number = 200): FrameSlot {
   // 1. 确立物理毫米 (mm) 为唯一真值 Source of Truth
   const xMm = typeof slot.xMm === 'number'
@@ -186,7 +340,16 @@ export function normalizeSlot(slot: any, pageWidthMm: number = 200, pageHeightMm
     locked: Boolean(slot.locked || slot.isLocked),
     visible: slot.visible !== undefined ? Boolean(slot.visible) : true,
     zIndex: typeof slot.zIndex === 'number' ? slot.zIndex : 1,
-    // 资产 ID 映射
+    fitMode: slot.fitMode || 'cover',
+    flipH: Boolean(slot.flipH),
+    flipV: Boolean(slot.flipV),
+    maskShape: slot.maskShape,
+    borderWidth: slot.borderWidth,
+    borderColor: slot.borderColor,
+    borderRadius: slot.borderRadius,
+    hasShadow: Boolean(slot.hasShadow),
+    shadowBlur: slot.shadowBlur,
+    shadowColor: slot.shadowColor,
     assetId: slot.assetId || slot.photoId,
     photoId: slot.photoId || slot.assetId,
     crop: slot.crop
@@ -229,18 +392,35 @@ export function createImmutableOrderSnapshot(params: {
   const frozenProject: ProjectDocument = JSON.parse(JSON.stringify(project));
   const frozenSpec: ProductSpec = JSON.parse(JSON.stringify(project.productSpec));
 
+  // 冻结快照信息
+  const productSpecSnapshot: ProductSpecSnapshot = project.productSpecSnapshot || {
+    snapshotId: `spec_snap_${frozenSpec.id}_v${frozenSpec.version || 1}`,
+    productSpecId: frozenSpec.id,
+    version: frozenSpec.version || 1,
+    frozenAt: Date.now(),
+    spec: frozenSpec,
+  };
+
   // 统计印刷实际页数与有效图片资产列表
-  const totalPages = frozenProject.spreads.length * 2;
+  const totalPages = frozenProject.pages ? frozenProject.pages.length : frozenProject.spreads.length * 2;
   const referencedAssetIds = new Set<string>();
 
-  frozenProject.spreads.forEach((s) => {
-    s.leftPage.slots.forEach((slot) => {
-      if (slot.assetId) referencedAssetIds.add(slot.assetId);
+  if (frozenProject.pages) {
+    frozenProject.pages.forEach((p) => {
+      p.slots.forEach((slot) => {
+        if (slot.assetId) referencedAssetIds.add(slot.assetId);
+      });
     });
-    s.rightPage.slots.forEach((slot) => {
-      if (slot.assetId) referencedAssetIds.add(slot.assetId);
+  } else {
+    frozenProject.spreads.forEach((s) => {
+      s.leftPage.slots.forEach((slot) => {
+        if (slot.assetId) referencedAssetIds.add(slot.assetId);
+      });
+      s.rightPage.slots.forEach((slot) => {
+        if (slot.assetId) referencedAssetIds.add(slot.assetId);
+      });
     });
-  });
+  }
 
   const snapshotId = `snap_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
@@ -250,6 +430,7 @@ export function createImmutableOrderSnapshot(params: {
     createdAt: Date.now(),
     frozenProject,
     productSpec: frozenSpec,
+    productSpecSnapshot,
     quantity,
     unitPrice,
     currency,
@@ -261,9 +442,9 @@ export function createImmutableOrderSnapshot(params: {
     printSummary: {
       pageCount: totalPages,
       totalPhotosUsed: referencedAssetIds.size,
-      totalPhysicalWidthMm: frozenSpec.widthMm * 2 + (frozenSpec.binding?.spineWidthMm || 0),
-      totalPhysicalHeightMm: frozenSpec.heightMm,
-      bleedMm: frozenSpec.bleedMm,
+      totalPhysicalWidthMm: (frozenSpec.pageSpec?.widthMm || frozenSpec.widthMm) * 2 + (frozenSpec.binding?.spineWidthMm || 0),
+      totalPhysicalHeightMm: frozenSpec.pageSpec?.heightMm || frozenSpec.heightMm,
+      bleedMm: frozenSpec.pageSpec?.bleedMm ?? frozenSpec.bleedMm,
     },
   };
 }

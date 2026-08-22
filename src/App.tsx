@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { SidebarNav } from './components/SidebarNav';
 import { PhotoTray } from './components/PhotoTray';
@@ -7,6 +7,7 @@ import { RightPagesSidebar } from './components/RightPagesSidebar';
 import { PreviewModal } from './components/PreviewModal';
 import { PrintExportModal } from './components/PrintExportModal';
 import { MultiPageEditorModal } from './components/MultiPageEditorModal';
+import { ProjectManagerModal } from './components/ProjectManagerModal';
 import {
   DEFAULT_BOOK_SPEC,
   createInitialSpreads,
@@ -14,6 +15,7 @@ import {
 } from './data/defaultTemplates';
 import {
   SpreadModel,
+  PageModel,
   UploadedPhoto,
   EditorViewConfig,
   PhotoCrop,
@@ -26,34 +28,108 @@ import {
   ProjectDocument,
   CURRENT_SCHEMA_VERSION,
 } from './types/editor';
+import { UserAccount } from './types/account';
+import { projectService } from './services/projectService';
+import { authService } from './services/authService';
+import { pricingService } from './services/pricingService';
+import { useAutoSave } from './services/autoSaveService';
 import {
   createImmutableOrderSnapshot,
   migrateProjectDocument,
   normalizeSlot,
 } from './utils/projectSerializer';
+import {
+  createLayoutAdapter,
+  updateSlotInPages,
+  updateSlotsInPage,
+  updatePageInPages,
+  reindexPagesForSpreads,
+} from './utils/layoutAdapter';
 import { MomoGlobalClipPaths, MOMO_MASK_DEFINITIONS } from './utils/masks';
 import { PresetStamp, PRESET_STAMPS, svgToDataUrl } from './data/stamps';
 
 export default function App() {
   const [bookSpec, setBookSpec] = useState<BookSpec>(DEFAULT_BOOK_SPEC);
   const [projectName, setProjectName] = useState<string>('我的照片书');
-  const [spreads, setSpreads] = useState<SpreadModel[]>(() => {
-    return createInitialSpreads().map((s) => ({
-      ...s,
-      leftPage: {
-        ...s.leftPage,
-        slots: s.leftPage.slots.map((sl) =>
-          normalizeSlot(sl, DEFAULT_BOOK_SPEC.widthMm, DEFAULT_BOOK_SPEC.heightMm)
-        ),
-      },
-      rightPage: {
-        ...s.rightPage,
-        slots: s.rightPage.slots.map((sl) =>
-          normalizeSlot(sl, DEFAULT_BOOK_SPEC.widthMm, DEFAULT_BOOK_SPEC.heightMm)
-        ),
-      },
-    }));
+
+  // 【核心架构准则】：pages: PageModel[] 为系统唯一 Source of Truth 持久化状态
+  const [pages, setPages] = useState<PageModel[]>(() => {
+    const initialDoc = migrateProjectDocument({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      id: 'proj_default',
+      title: '我的照片书',
+      productSpec: DEFAULT_BOOK_SPEC,
+      spreads: createInitialSpreads().map((s) => ({
+        ...s,
+        leftPage: {
+          ...s.leftPage,
+          slots: s.leftPage.slots.map((sl) =>
+            normalizeSlot(sl, DEFAULT_BOOK_SPEC.widthMm, DEFAULT_BOOK_SPEC.heightMm)
+          ),
+        },
+        rightPage: {
+          ...s.rightPage,
+          slots: s.rightPage.slots.map((sl) =>
+            normalizeSlot(sl, DEFAULT_BOOK_SPEC.widthMm, DEFAULT_BOOK_SPEC.heightMm)
+          ),
+        },
+      })),
+      photos: SAMPLE_PHOTOS,
+    });
+    return initialDoc.pages;
   });
+
+  // 纯逻辑适配层：从 pages + productSpec 实时派生视图渲染模型 (Read-only View Models)
+  const layoutAdapter = useMemo(
+    () => createLayoutAdapter(bookSpec.layoutMode || 'dual_spread'),
+    [bookSpec.layoutMode]
+  );
+
+  const renderUnits = useMemo(
+    () => layoutAdapter.adaptToRender(pages, bookSpec),
+    [layoutAdapter, pages, bookSpec]
+  );
+
+  // 向下兼容现有 SpreadCanvas、RightPagesSidebar 等视图组件的 SpreadModel[] 适配映射 (只读派生数据)
+  const spreads: SpreadModel[] = useMemo(() => {
+    return renderUnits.map((u) => ({
+      id: u.id,
+      spreadIndex: u.unitIndex,
+      name: u.title,
+      isCover: u.isCover,
+      leftPage: {
+        id: u.leftPage.sourcePageId,
+        pageNumber: u.leftPage.pageNumber,
+        faceType: u.leftPage.faceType,
+        isLeft: u.leftPage.isLeft,
+        backgroundColor: u.leftPage.backgroundColor || '#ffffff',
+        backgroundImage: u.leftPage.backgroundImage,
+        slots: u.leftPage.elements as FrameSlot[],
+        elements: u.leftPage.elements as FrameSlot[],
+      },
+      rightPage: u.rightPage
+        ? {
+            id: u.rightPage.sourcePageId,
+            pageNumber: u.rightPage.pageNumber,
+            faceType: u.rightPage.faceType,
+            isLeft: u.rightPage.isLeft,
+            backgroundColor: u.rightPage.backgroundColor || '#ffffff',
+            backgroundImage: u.rightPage.backgroundImage,
+            slots: u.rightPage.elements as FrameSlot[],
+            elements: u.rightPage.elements as FrameSlot[],
+          }
+        : {
+            id: `empty_right_${u.unitIndex}`,
+            pageNumber: 0,
+            faceType: 'inside_right',
+            isLeft: false,
+            backgroundColor: '#ffffff',
+            slots: [],
+            elements: [],
+          },
+    }));
+  }, [renderUnits]);
+
   // 默认选中第 3 个跨页 (即第 4-5 跨页，与用户截图完全一致)
   const [currentSpreadIndex, setCurrentSpreadIndex] = useState<number>(3);
   const [photos, setPhotos] = useState<UploadedPhoto[]>(SAMPLE_PHOTOS);
@@ -74,51 +150,129 @@ export default function App() {
   const [isPrintExportOpen, setIsPrintExportOpen] = useState<boolean>(false);
   const [isMultiPageOpen, setIsMultiPageOpen] = useState<boolean>(false);
 
-  // 商业化草稿保存与快照处理 (自动补齐物理毫米坐标与标准 Schema)
-  const handleSaveProject = useCallback(() => {
-    const rawDoc = {
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-      id: `proj_${Date.now()}`,
-      title: projectName,
-      productSpec: bookSpec,
-      spreads,
-      photos,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    const doc = migrateProjectDocument(rawDoc);
-    try {
-      localStorage.setItem('photobook_current_draft', JSON.stringify(doc));
-    } catch (e) {
-      console.warn('Draft local cache note:', e);
+  // 多工程管理与用户身份状态
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string>('proj_default');
+  const [currentProjectCreatedAt, setCurrentProjectCreatedAt] = useState<number>(Date.now());
+  const [isProjectManagerOpen, setIsProjectManagerOpen] = useState<boolean>(false);
+
+  // 全局轻量 Toast 提示
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2500);
+  }, []);
+
+  // 初始加载用户身份与最近工程
+  useEffect(() => {
+    async function initProjectWorkspace() {
+      try {
+        const user = await authService.getCurrentUser();
+        setCurrentUser(user);
+        const projects = await projectService.listUserProjects();
+        if (projects.length > 0) {
+          const firstProj = await projectService.openProject(projects[0].projectId);
+          if (firstProj) {
+            setCurrentProjectId(firstProj.id);
+            setProjectName(firstProj.title);
+            setBookSpec(firstProj.productSpec);
+            setPages(firstProj.pages);
+            setPhotos(firstProj.photos || []);
+            setCurrentProjectCreatedAt(firstProj.createdAt || Date.now());
+          }
+        }
+      } catch (err) {
+        console.warn('初始化工程工作区提示:', err);
+      }
     }
-  }, [projectName, bookSpec, spreads, photos]);
+    initProjectWorkspace();
+  }, []);
+
+  // 派生当前正在编辑的完整 ProjectDocument 实体
+  const currentDoc: ProjectDocument = useMemo(() => ({
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    id: currentProjectId || 'proj_default',
+    title: projectName,
+    productSpec: bookSpec,
+    pages,
+    photos,
+    createdAt: currentProjectCreatedAt,
+    updatedAt: Date.now(),
+  }), [currentProjectId, projectName, bookSpec, pages, photos, currentProjectCreatedAt]);
+
+  // 自动防抖保存服务 (1000ms debounce 防抖)
+  const { saveStatus, forceSaveNow } = useAutoSave(currentDoc, {
+    debounceMs: 1000,
+    enabled: !!currentProjectId,
+  });
+
+  // 解耦的商业价格计算引擎 (支持代理商/会员角色阶梯折算)
+  const currentPriceBreakdown = useMemo(() => {
+    return pricingService.calculatePrice({
+      productSpec: bookSpec,
+      pageCount: pages.length,
+      quantity: 1,
+      context: {
+        role: currentUser?.role || 'agent',
+        priceTier: currentUser?.tierId || 'tier_agent_gold',
+      },
+    });
+  }, [bookSpec, pages.length, currentUser]);
+
+  // 打开并切换作品 (完全隔离 pages 与工程上下文)
+  const handleSelectProject = useCallback(async (projectId: string) => {
+    try {
+      const doc = await projectService.openProject(projectId);
+      setCurrentProjectId(doc.id);
+      setProjectName(doc.title);
+      setBookSpec(doc.productSpec);
+      setPages(doc.pages);
+      setPhotos(doc.photos || []);
+      setCurrentProjectCreatedAt(doc.createdAt || Date.now());
+      setSelectedSlotId(null);
+      setSelectedSlotIds([]);
+      setCurrentSpreadIndex(1); // 默认定位到正文第 1 跨页
+      setHistory([doc.pages]);
+      setHistoryIndex(0);
+      showToast(`已成功载入作品「${doc.title}」`);
+    } catch (err: any) {
+      console.error('切换作品失败:', err);
+      showToast(`载入失败: ${err.message}`);
+    }
+  }, [showToast]);
+
+  // 商业化草稿保存与快照处理 (直接写入唯一持久化数据源 pages 并同步更新作品库)
+  const handleSaveProject = useCallback(() => {
+    forceSaveNow();
+    showToast('作品已成功保存到本地工程库');
+  }, [forceSaveNow, showToast]);
 
   // 商业化加入购物车/下单：生成不可篡改的订单快照
   const handleAddToCart = useCallback(() => {
-    const rawDoc = {
+    const rawDoc: ProjectDocument = {
       schemaVersion: CURRENT_SCHEMA_VERSION,
-      id: `proj_${Date.now()}`,
+      id: currentProjectId || `proj_${Date.now()}`,
       title: projectName,
       productSpec: bookSpec,
-      spreads,
+      pages,
       photos,
-      createdAt: Date.now(),
+      createdAt: currentProjectCreatedAt,
       updatedAt: Date.now(),
     };
     const doc = migrateProjectDocument(rawDoc);
     const orderSnapshot = createImmutableOrderSnapshot({
       project: doc,
       quantity: 1,
-      unitPrice: 99.0,
+      unitPrice: currentPriceBreakdown.subtotal,
       currency: 'CNY',
     });
     try {
       localStorage.setItem(`order_snapshot_${orderSnapshot.snapshotId}`, JSON.stringify(orderSnapshot));
+      showToast(`已生成订单快照 (结算价: ${pricingService.formatPrice(currentPriceBreakdown.total)})`);
     } catch (e) {
       console.warn('Order snapshot cache note:', e);
     }
-  }, [projectName, bookSpec, spreads, photos]);
+  }, [currentProjectId, projectName, bookSpec, pages, photos, currentProjectCreatedAt, currentPriceBreakdown, showToast]);
 
   // 侧边栏一级 Tab 状态与折叠状态
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab | null>('photos');
@@ -139,30 +293,21 @@ export default function App() {
     zoomPercent: 100,
   });
 
-  // 撤销 / 重做 历史栈
-  const [history, setHistory] = useState<SpreadModel[][]>([createInitialSpreads()]);
+  // 撤销 / 重做 历史栈 (存储 PageModel[][] 作为历史状态)
+  const [history, setHistory] = useState<PageModel[][]>(() => [pages]);
   const [historyIndex, setHistoryIndex] = useState<number>(0);
-
-  // 全局轻量 Toast 提示
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // 智能计算并自动贴合屏幕的最佳缩放比例 (Auto-Fit Zoom)
   const handleAutoFitToScreen = useCallback(() => {
-    // 默认保持 100% 居中标准比例
     setViewConfig((prev) => ({ ...prev, zoomPercent: 100 }));
-  }, []);
-
-  // 初次加载与侧边栏折叠/展开时保持默认 100% 居中视口
-  useEffect(() => {
-    // 默认保持 100% 居中
   }, []);
 
   // 记录历史快照
   const pushHistory = useCallback(
-    (newSpreads: SpreadModel[]) => {
+    (newPages: PageModel[]) => {
       setHistory((prev) => {
         const sliced = prev.slice(0, historyIndex + 1);
-        return [...sliced, newSpreads];
+        return [...sliced, newPages];
       });
       setHistoryIndex((prev) => prev + 1);
     },
@@ -174,7 +319,7 @@ export default function App() {
     if (historyIndex > 0) {
       const nextIdx = historyIndex - 1;
       setHistoryIndex(nextIdx);
-      setSpreads(history[nextIdx]);
+      setPages(history[nextIdx]);
     }
   }, [historyIndex, history]);
 
@@ -183,18 +328,16 @@ export default function App() {
     if (historyIndex < history.length - 1) {
       const nextIdx = historyIndex + 1;
       setHistoryIndex(nextIdx);
-      setSpreads(history[nextIdx]);
+      setPages(history[nextIdx]);
     }
   }, [historyIndex, history]);
 
-  // 动态同步计算每张照片在画册中的 usedCount
+  // 动态同步计算每张照片在画册中的 usedCount (从 pages 提取)
   useEffect(() => {
     const counts = new Map<string, number>();
-    spreads.forEach((spread) => {
-      spread.leftPage.slots.forEach((s) => {
-        if (s.photoId) counts.set(s.photoId, (counts.get(s.photoId) || 0) + 1);
-      });
-      spread.rightPage.slots.forEach((s) => {
+    pages.forEach((page) => {
+      const slots = page.slots || page.elements || [];
+      slots.forEach((s) => {
         if (s.photoId) counts.set(s.photoId, (counts.get(s.photoId) || 0) + 1);
       });
     });
@@ -205,7 +348,7 @@ export default function App() {
         usedCount: counts.get(p.id) || 0,
       }))
     );
-  }, [spreads]);
+  }, [pages]);
 
   // 选中槽位 (支持 Ctrl / Cmd 增量多选与反选，并自动识别当前操作所属单页)
   const handleSelectSlot = (slotId: string | null, isMultiToggle?: boolean) => {
@@ -265,33 +408,17 @@ export default function App() {
     }
   }, [spreads, currentSpreadIndex]);
 
-  // 互换两个画框的照片 (支持同一页或跨左/右页，保持各自画框网格不变)
+  // 互换两个画框的照片 (支持同一页或跨左/右页，保持各自画框网格不变，直接写入 pages)
   const handleSwapSlotsPhotos = useCallback((slotIdA: string, slotIdB: string) => {
-    const currentSpread = spreads[currentSpreadIndex];
-    if (!currentSpread) return;
-
     let slotA: FrameSlot | undefined;
     let slotB: FrameSlot | undefined;
-    let pageAId: string | undefined;
-    let pageBId: string | undefined;
 
-    // 寻找 Slot A
-    if (currentSpread.leftPage.slots.some((s) => s.id === slotIdA)) {
-      slotA = currentSpread.leftPage.slots.find((s) => s.id === slotIdA);
-      pageAId = currentSpread.leftPage.id;
-    } else if (currentSpread.rightPage.slots.some((s) => s.id === slotIdA)) {
-      slotA = currentSpread.rightPage.slots.find((s) => s.id === slotIdA);
-      pageBId = currentSpread.rightPage.id;
-      pageAId = currentSpread.rightPage.id;
-    }
-
-    // 寻找 Slot B
-    if (currentSpread.leftPage.slots.some((s) => s.id === slotIdB)) {
-      slotB = currentSpread.leftPage.slots.find((s) => s.id === slotIdB);
-      pageBId = currentSpread.leftPage.id;
-    } else if (currentSpread.rightPage.slots.some((s) => s.id === slotIdB)) {
-      slotB = currentSpread.rightPage.slots.find((s) => s.id === slotIdB);
-      pageBId = currentSpread.rightPage.id;
+    for (const page of pages) {
+      const rawSlots = page.slots || page.elements || [];
+      for (const s of rawSlots) {
+        if (s.id === slotIdA) slotA = s;
+        if (s.id === slotIdB) slotB = s;
+      }
     }
 
     if (!slotA || !slotB) return;
@@ -299,114 +426,95 @@ export default function App() {
     const photoIdA = slotA.photoId;
     const photoIdB = slotB.photoId;
 
-    // 更新当前 Spread
-    const nextSpreads = spreads.map((spread, idx) => {
-      if (idx !== currentSpreadIndex) return spread;
+    const nextPages = pages.map((page) => {
+      const rawSlots = page.slots || page.elements || [];
+      if (!rawSlots.some((s) => s.id === slotIdA || s.id === slotIdB)) return page;
 
-      const updateSlots = (slots: FrameSlot[]) =>
-        slots.map((s) => {
-          if (s.id === slotIdA) {
-            return {
-              ...s,
-              photoId: photoIdB,
-              crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
-            };
-          }
-          if (s.id === slotIdB) {
-            return {
-              ...s,
-              photoId: photoIdA,
-              crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
-            };
-          }
-          return s;
-        });
+      const updatedSlots = rawSlots.map((s) => {
+        if (s.id === slotIdA) {
+          return {
+            ...s,
+            photoId: photoIdB,
+            assetId: photoIdB,
+            crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
+          };
+        }
+        if (s.id === slotIdB) {
+          return {
+            ...s,
+            photoId: photoIdA,
+            assetId: photoIdA,
+            crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
+          };
+        }
+        return s;
+      });
 
       return {
-        ...spread,
-        leftPage: {
-          ...spread.leftPage,
-          slots: updateSlots(spread.leftPage.slots),
-        },
-        rightPage: {
-          ...spread.rightPage,
-          slots: updateSlots(spread.rightPage.slots),
-        },
+        ...page,
+        slots: updatedSlots,
+        elements: updatedSlots,
       };
     });
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
     setSelectedSlotId(slotIdB);
     setSelectedSlotIds([slotIdB]);
     setToastMessage('已互换两张照片（画框位置与尺寸保持不变）');
     setTimeout(() => setToastMessage(null), 2500);
-  }, [spreads, currentSpreadIndex, pushHistory]);
+  }, [pages, pushHistory]);
 
-  // 跨页左右版面互换 (方案 A：整页版式结构、画框布局与照片整体对调)
+  // 跨页左右版面互换 (方案 A：整页版式结构、画框布局与照片整体对调，直接更新 pages)
   const handleSwapSpreadPagePhotos = useCallback((targetSpreadIndex?: number) => {
     const spreadIdx = targetSpreadIndex !== undefined ? targetSpreadIndex : currentSpreadIndex;
-    const targetSpread = spreads[spreadIdx];
-    if (!targetSpread) return;
+    const leftPageIdx = spreadIdx * 2;
+    const rightPageIdx = spreadIdx * 2 + 1;
+    if (leftPageIdx >= pages.length || rightPageIdx >= pages.length) return;
 
-    const nextSpreads = spreads.map((spread, idx) => {
-      if (idx !== spreadIdx) return spread;
+    const leftPage = pages[leftPageIdx];
+    const rightPage = pages[rightPageIdx];
 
-      // 获取左页与右页的原版内容
-      const leftSlots = spread.leftPage.slots;
-      const rightSlots = spread.rightPage.slots;
-      const leftBg = spread.leftPage.backgroundColor;
-      const rightBg = spread.rightPage.backgroundColor;
-      const leftBgImg = spread.leftPage.backgroundImage;
-      const rightBgImg = spread.rightPage.backgroundImage;
-      const leftLayoutId = spread.leftPage.layoutId;
-      const rightLayoutId = spread.rightPage.layoutId;
+    const nextPages = [...pages];
+    nextPages[leftPageIdx] = {
+      ...leftPage,
+      slots: rightPage.slots || rightPage.elements || [],
+      elements: rightPage.slots || rightPage.elements || [],
+      backgroundColor: rightPage.backgroundColor,
+      backgroundImage: rightPage.backgroundImage,
+    };
+    nextPages[rightPageIdx] = {
+      ...rightPage,
+      slots: leftPage.slots || leftPage.elements || [],
+      elements: leftPage.slots || leftPage.elements || [],
+      backgroundColor: leftPage.backgroundColor,
+      backgroundImage: leftPage.backgroundImage,
+    };
 
-      return {
-        ...spread,
-        leftPage: {
-          ...spread.leftPage,
-          slots: rightSlots,
-          backgroundColor: rightBg,
-          backgroundImage: rightBgImg,
-          layoutId: rightLayoutId,
-        },
-        rightPage: {
-          ...spread.rightPage,
-          slots: leftSlots,
-          backgroundColor: leftBg,
-          backgroundImage: leftBgImg,
-          layoutId: leftLayoutId,
-        },
-      };
-    });
+    setPages(nextPages);
+    pushHistory(nextPages);
+  }, [pages, currentSpreadIndex, pushHistory]);
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
-  }, [spreads, currentSpreadIndex, pushHistory]);
-
-  // 批量删除多个选中的画框
+  // 批量删除多个选中的画框 (直接更新 pages)
   const handleDeleteMultipleSlotsAcrossPages = useCallback((slotIds: string[]) => {
     if (!slotIds || slotIds.length === 0) return;
     const deleteSet = new Set(slotIds);
 
-    const nextSpreads = spreads.map((spread) => ({
-      ...spread,
-      leftPage: {
-        ...spread.leftPage,
-        slots: spread.leftPage.slots.filter((s) => !deleteSet.has(s.id)),
-      },
-      rightPage: {
-        ...spread.rightPage,
-        slots: spread.rightPage.slots.filter((s) => !deleteSet.has(s.id)),
-      },
-    }));
+    const nextPages = pages.map((page) => {
+      const rawSlots = page.slots || page.elements || [];
+      const updated = rawSlots.filter((s) => !deleteSet.has(s.id));
+      return {
+        ...page,
+        slots: updated,
+        elements: updated,
+      };
+    });
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
     setSelectedSlotId(null);
     setSelectedSlotIds([]);
-  }, [spreads, pushHistory]);
+  }, [pages, pushHistory]);
 
   // ---------------- 1:1 米莫印品 专业级画框剪贴板（Ctrl+C 复制 / Ctrl+X 剪切 / Ctrl+V 粘贴 / Ctrl+D 原地克隆） ----------------
   // 复制当前选中的单选或多选画框
@@ -444,7 +552,7 @@ export default function App() {
     handleDeleteMultipleSlotsAcrossPages(activeIds);
   }, [selectedSlotIds, selectedSlotId, handleCopySlots, handleDeleteMultipleSlotsAcrossPages]);
 
-  // 粘贴画框 (Ctrl + V)，支持同页递增微量偏移 (+3%) 与跨页精准粘贴
+  // 粘贴画框 (Ctrl + V)，支持同页递增微量偏移 (+3%) 与跨页精准粘贴 (写入 pages)
   const handlePasteSlots = useCallback(() => {
     if (!slotClipboard || !slotClipboard.slots || slotClipboard.slots.length === 0) return;
 
@@ -480,28 +588,21 @@ export default function App() {
       }, bookSpec.widthMm, bookSpec.heightMm);
     });
 
-    const nextSpreads = spreads.map((s, idx) => {
-      if (idx !== currentSpreadIndex) return s;
-      const isLeft = targetSide === 'left';
-      const targetPage = isLeft ? s.leftPage : s.rightPage;
-      return {
-        ...s,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: [...targetPage.slots, ...newSlots],
-        },
-      };
-    });
+    const targetPageIdx = currentSpreadIndex * 2 + (targetSide === 'left' ? 0 : 1);
+    if (targetPageIdx >= pages.length) return;
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    const targetPageId = pages[targetPageIdx].id;
+    const nextPages = updateSlotsInPage(pages, targetPageId, (existing) => [...existing, ...newSlots]);
+
+    setPages(nextPages);
+    pushHistory(nextPages);
 
     // 自动高亮选中新粘贴生成的画框
     setSelectedSlotIds(newSlotIds);
     setSelectedSlotId(newSlotIds[newSlotIds.length - 1]);
     setActiveSide(targetSide);
     setPasteCount((prev) => prev + 1);
-  }, [slotClipboard, spreads, currentSpreadIndex, activeSide, pasteCount, pushHistory]);
+  }, [slotClipboard, spreads, pages, currentSpreadIndex, activeSide, pasteCount, bookSpec, pushHistory]);
 
   // 快速就地原样克隆选中画框 (Ctrl + D)
   const handleDuplicateSelection = useCallback(() => {
@@ -509,7 +610,6 @@ export default function App() {
     if (activeIds.length === 0) return;
 
     handleCopySlots();
-    // 延迟一个渲染周期待剪贴板更新后立即粘贴
     setTimeout(() => {
       handlePasteSlots();
     }, 0);
@@ -528,7 +628,6 @@ export default function App() {
       let newSlots = [...slots];
 
       if (action === 'bringForward') {
-        // 从倒数第二个往前遍历，若当前元素被选中且下一个未被选中，则互换
         for (let i = newSlots.length - 2; i >= 0; i--) {
           if (selectedSet.has(newSlots[i].id) && !selectedSet.has(newSlots[i + 1].id)) {
             const temp = newSlots[i];
@@ -537,7 +636,6 @@ export default function App() {
           }
         }
       } else if (action === 'sendBackward') {
-        // 从第二个往后遍历，若当前元素被选中且前一个未被选中，则互换
         for (let i = 1; i < newSlots.length; i++) {
           if (selectedSet.has(newSlots[i].id) && !selectedSet.has(newSlots[i - 1].id)) {
             const temp = newSlots[i];
@@ -546,12 +644,10 @@ export default function App() {
           }
         }
       } else if (action === 'bringToFront') {
-        // 将选中的元素整体移至末尾（最顶层），保留相对先后次序
         const unselected = newSlots.filter((s) => !selectedSet.has(s.id));
         const selected = newSlots.filter((s) => selectedSet.has(s.id));
         newSlots = [...unselected, ...selected];
       } else if (action === 'sendToBack') {
-        // 将选中的元素整体移至开头（最底层），保留相对先后次序
         const unselected = newSlots.filter((s) => !selectedSet.has(s.id));
         const selected = newSlots.filter((s) => selectedSet.has(s.id));
         newSlots = [...selected, ...unselected];
@@ -561,29 +657,29 @@ export default function App() {
     };
 
     let hasChanged = false;
-    const nextSpreads = spreads.map((spread, idx) => {
-      if (idx !== currentSpreadIndex) return spread;
+    const leftPageIdx = currentSpreadIndex * 2;
+    const rightPageIdx = currentSpreadIndex * 2 + 1;
 
-      const nextLeftSlots = reorderSlots(spread.leftPage.slots);
-      const nextRightSlots = reorderSlots(spread.rightPage.slots);
+    const nextPages = pages.map((page, idx) => {
+      if (idx !== leftPageIdx && idx !== rightPageIdx) return page;
 
-      const leftChanged = nextLeftSlots.some((s, i) => s.id !== spread.leftPage.slots[i]?.id);
-      const rightChanged = nextRightSlots.some((s, i) => s.id !== spread.rightPage.slots[i]?.id);
+      const rawSlots = page.slots || page.elements || [];
+      const nextSlots = reorderSlots(rawSlots);
 
-      if (leftChanged || rightChanged) {
+      if (nextSlots.some((s, i) => s.id !== rawSlots[i]?.id)) {
         hasChanged = true;
       }
 
       return {
-        ...spread,
-        leftPage: { ...spread.leftPage, slots: nextLeftSlots },
-        rightPage: { ...spread.rightPage, slots: nextRightSlots },
+        ...page,
+        slots: nextSlots,
+        elements: nextSlots,
       };
     });
 
     if (hasChanged) {
-      setSpreads(nextSpreads);
-      pushHistory(nextSpreads);
+      setPages(nextPages);
+      pushHistory(nextPages);
       const actionLabels: Record<string, string> = {
         bringForward: '已将图层向前上移一层',
         sendBackward: '已将图层向后下移一层',
@@ -602,7 +698,7 @@ export default function App() {
       setToastMessage(boundaryLabels[action] || '无法继续调整');
       setTimeout(() => setToastMessage(null), 2000);
     }
-  }, [selectedSlotIds, selectedSlotId, spreads, currentSpreadIndex, pushHistory]);
+  }, [selectedSlotIds, selectedSlotId, pages, currentSpreadIndex, pushHistory]);
 
   // 快捷键监听 (支持 Ctrl+Z, Ctrl+Y, Ctrl+C 复制, Ctrl+X 剪切, Ctrl+V 粘贴, Ctrl+D 克隆, Escape, Delete/Backspace 批量删除)
   useEffect(() => {
@@ -716,60 +812,30 @@ export default function App() {
     setPhotos((prev) => [...newPhotos, ...prev]);
   };
 
-  // 从托盘删除照片
+  // 从托盘删除照片 (清除 pages 中对此照片的引用)
   const handleRemovePhoto = (photoId: string) => {
     setPhotos((prev) => prev.filter((p) => p.id !== photoId));
-    // 清除页面中对此照片的引用
-    const nextSpreads = spreads.map((spread) => ({
-      ...spread,
-      leftPage: {
-        ...spread.leftPage,
-        slots: spread.leftPage.slots.map((s) =>
-          s.photoId === photoId ? { ...s, photoId: undefined, crop: undefined } : s
-        ),
-      },
-      rightPage: {
-        ...spread.rightPage,
-        slots: spread.rightPage.slots.map((s) =>
-          s.photoId === photoId ? { ...s, photoId: undefined, crop: undefined } : s
-        ),
-      },
-    }));
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    const nextPages = pages.map((page) => {
+      const rawSlots = page.slots || page.elements || [];
+      const updated = rawSlots.map((s) =>
+        s.photoId === photoId ? { ...s, photoId: undefined, assetId: undefined, crop: undefined } : s
+      );
+      return { ...page, slots: updated, elements: updated };
+    });
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 将照片放入指定槽位
+  // 将照片放入指定槽位 (写入 pages)
   const handleDropPhotoToSlot = (pageId: string, slotId: string, photoId: string) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
-
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) => {
-        if (s.id === slotId) {
-          return {
-            ...s,
-            photoId,
-            crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
-          };
-        }
-        return s;
-      });
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
-        },
-      };
-    });
-
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    const nextPages = updateSlotInPages(pages, pageId, slotId, (s) => ({
+      ...s,
+      photoId,
+      assetId: photoId,
+      crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
+    }));
+    setPages(nextPages);
+    pushHistory(nextPages);
     setSelectedSlotId(slotId);
   };
 
@@ -790,38 +856,17 @@ export default function App() {
     }
   };
 
-  // 执行替换照片 (严格遵循只换照片不换画框原则)
+  // 执行替换照片 (严格遵循只换照片不换画框原则，写入 pages)
   const handleSwapSlotPhoto = useCallback((pageId: string, slotId: string, newPhotoId: string) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
+    const nextPages = updateSlotInPages(pages, pageId, slotId, (s) => ({
+      ...s,
+      photoId: newPhotoId,
+      assetId: newPhotoId,
+      crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
+    }));
 
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) => {
-        if (s.id === slotId) {
-          // 核心：只替换 photoId (assetId) 与重置为安全 cover crop，画框 ID/坐标/尺寸/旋转/层级等 100% 保持不变
-          return {
-            ...s,
-            photoId: newPhotoId,
-            crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
-          };
-        }
-        return s;
-      });
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
-        },
-      };
-    });
-
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
     setSelectedSlotId(slotId);
     setSelectedSlotIds([slotId]);
 
@@ -830,94 +875,56 @@ export default function App() {
       setToastMessage(`已更换为「${targetPhoto.name}」（画框保持不变）`);
       setTimeout(() => setToastMessage(null), 2500);
     }
-  }, [spreads, photos, pushHistory]);
+  }, [pages, photos, pushHistory]);
 
-  // 更新槽位裁剪/缩放参数
+  // 更新槽位裁剪/缩放参数 (写入 pages)
   const handleUpdateSlotCrop = (pageId: string, slotId: string, crop: PhotoCrop) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
-
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) => (s.id === slotId ? { ...s, crop } : s));
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
-        },
-      };
-    });
-
-    setSpreads(nextSpreads);
+    const nextPages = updateSlotInPages(pages, pageId, slotId, (s) => ({
+      ...s,
+      crop,
+    }));
+    setPages(nextPages);
   };
 
-  // 更新画框在页面上的坐标与尺寸 (DIY 自由排版，严格同步物理毫米真值)
+  // 更新画框在页面上的坐标与尺寸 (DIY 自由排版，严格同步物理毫米真值，写入 pages)
   const handleUpdateSlotBounds = (
     pageId: string,
     slotId: string,
     bounds: { x: number; y: number; width: number; height: number; rotation?: number }
   ) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
-
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) => {
-        if (s.id !== slotId) return s;
-        const x = bounds.x;
-        const y = bounds.y;
-        const width = bounds.width;
-        const height = bounds.height;
-        const xMm = Number(((x / 100) * bookSpec.widthMm).toFixed(2));
-        const yMm = Number(((y / 100) * bookSpec.heightMm).toFixed(2));
-        const widthMm = Number(((width / 100) * bookSpec.widthMm).toFixed(2));
-        const heightMm = Number(((height / 100) * bookSpec.heightMm).toFixed(2));
-        return {
-          ...s,
-          x,
-          y,
-          width,
-          height,
-          xMm,
-          yMm,
-          widthMm,
-          heightMm,
-          rotation: bounds.rotation !== undefined ? bounds.rotation : s.rotation,
-        };
-      });
-
+    const nextPages = updateSlotInPages(pages, pageId, slotId, (s) => {
+      const x = bounds.x;
+      const y = bounds.y;
+      const width = bounds.width;
+      const height = bounds.height;
+      const xMm = Number(((x / 100) * bookSpec.widthMm).toFixed(2));
+      const yMm = Number(((y / 100) * bookSpec.heightMm).toFixed(2));
+      const widthMm = Number(((width / 100) * bookSpec.widthMm).toFixed(2));
+      const heightMm = Number(((height / 100) * bookSpec.heightMm).toFixed(2));
       return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
-        },
+        ...s,
+        x,
+        y,
+        width,
+        height,
+        xMm,
+        yMm,
+        widthMm,
+        heightMm,
+        rotation: bounds.rotation !== undefined ? bounds.rotation : s.rotation,
       };
     });
-
-    setSpreads(nextSpreads);
+    setPages(nextPages);
   };
 
-  // 批量更新多个槽位的位置 (多选批量平移，严格同步物理毫米真值)
+  // 批量更新多个槽位的位置 (多选批量平移，严格同步物理毫米真值，写入 pages)
   const handleUpdateMultipleSlotsBounds = (
     pageId: string,
     updates: { slotId: string; bounds: { x: number; y: number; width: number; height: number; rotation?: number } }[]
   ) => {
     const updateMap = new Map(updates.map((u) => [u.slotId, u.bounds]));
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
-
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) => {
+    const nextPages = updateSlotsInPage(pages, pageId, (slots) =>
+      slots.map((s) => {
         const b = updateMap.get(s.id);
         if (!b) return s;
         const x = b.x;
@@ -940,23 +947,14 @@ export default function App() {
           heightMm,
           rotation: b.rotation !== undefined ? b.rotation : s.rotation,
         };
-      });
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
-        },
-      };
-    });
-
-    setSpreads(nextSpreads);
+      })
+    );
+    setPages(nextPages);
   };
 
   // 提交画框位置变动到历史
   const handleCommitSlotBounds = () => {
-    pushHistory(spreads);
+    pushHistory(pages);
   };
 
   // 删除画框
@@ -964,95 +962,49 @@ export default function App() {
     handleDeleteMultipleSlotsAcrossPages([slotId]);
   };
 
-  // 复制画框
+  // 复制画框 (写入 pages)
   const handleDuplicateSlot = (pageId: string, slotId: string) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
+    const targetPage = pages.find((p) => p.id === pageId);
+    if (!targetPage) return;
+    const rawSlots = targetPage.slots || targetPage.elements || [];
+    const slotToClone = rawSlots.find((s) => s.id === slotId);
+    if (!slotToClone) return;
 
-      if (!isLeft && !isRight) return spread;
+    const clonedSlot: FrameSlot = normalizeSlot({
+      ...slotToClone,
+      id: `slot_dup_${Date.now()}`,
+      x: Math.min(85, slotToClone.x + 4),
+      y: Math.min(85, slotToClone.y + 4),
+    }, bookSpec.widthMm, bookSpec.heightMm);
 
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const slotToClone = targetPage.slots.find((s) => s.id === slotId);
-      if (!slotToClone) return spread;
-
-      const clonedSlot: FrameSlot = normalizeSlot({
-        ...slotToClone,
-        id: `slot_dup_${Date.now()}`,
-        x: Math.min(85, slotToClone.x + 4),
-        y: Math.min(85, slotToClone.y + 4),
-      }, bookSpec.widthMm, bookSpec.heightMm);
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: [...targetPage.slots, clonedSlot],
-        },
-      };
-    });
-
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    const nextPages = updateSlotsInPage(pages, pageId, (slots) => [...slots, clonedSlot]);
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 清除槽位照片
+  // 清除槽位照片 (写入 pages)
   const handleClearSlotPhoto = (pageId: string, slotId: string) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
-
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) =>
-        s.id === slotId ? { ...s, photoId: undefined, crop: undefined } : s
-      );
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
-        },
-      };
-    });
-
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    const nextPages = updateSlotInPages(pages, pageId, slotId, (s) => ({
+      ...s,
+      photoId: undefined,
+      assetId: undefined,
+      crop: undefined,
+    }));
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 更新画框扩展属性 (遮罩、描边、圆角、不透明度、投影、适应模式、水平翻转等)
+  // 更新画框扩展属性 (遮罩、描边、圆角、不透明度、投影、适应模式、水平翻转等，写入 pages)
   const handleUpdateSlotProps = (pageId: string, slotId: string, newProps: Partial<FrameSlot>) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
-
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) => {
-        if (s.id !== slotId) return s;
-        return {
-          ...s,
-          ...newProps,
-        };
-      });
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
-        },
-      };
-    });
-
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    const nextPages = updateSlotInPages(pages, pageId, slotId, (s) => ({
+      ...s,
+      ...newProps,
+    }));
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 应用蒙版到画框 (从左侧蒙版面板或快捷栏触发)
+  // 应用蒙版到画框 (从左侧蒙版面板或快捷栏触发，写入 pages)
   const handleApplyMask = (maskId: MaskShape) => {
     let targetPageId: string | null = null;
     let targetSlotId: string | null = selectedSlotId;
@@ -1086,20 +1038,11 @@ export default function App() {
           maskShape: maskId,
         }, bookSpec.widthMm, bookSpec.heightMm);
 
-        const pageToAddTo = (activeSide === 'right') ? 'rightPage' : 'leftPage';
-        const nextSpreads = spreads.map((spread, idx) => {
-          if (idx !== currentSpreadIndex) return spread;
-          return {
-            ...spread,
-            [pageToAddTo]: {
-              ...spread[pageToAddTo],
-              slots: [...spread[pageToAddTo].slots, newSlot],
-            },
-          };
-        });
+        const pageToAddTo = (activeSide === 'right') ? currentSpread.rightPage.id : currentSpread.leftPage.id;
+        const nextPages = updateSlotsInPage(pages, pageToAddTo, (slots) => [...slots, newSlot]);
 
-        setSpreads(nextSpreads);
-        pushHistory(nextSpreads);
+        setPages(nextPages);
+        pushHistory(nextPages);
         setSelectedSlotId(newSlot.id);
         setSelectedSlotIds([newSlot.id]);
         const maskDef = MOMO_MASK_DEFINITIONS.find((m) => m.id === maskId);
@@ -1117,14 +1060,13 @@ export default function App() {
     }
   };
 
-  // 添加图章到当前跨页（左页或右页）
+  // 添加图章到当前跨页 (写入 pages)
   const handleAddStamp = (stamp: PresetStamp) => {
     const currentSpread = spreads[currentSpreadIndex];
     if (!currentSpread) return;
 
     let targetSide: 'left' | 'right' = activeSide || 'left';
 
-    // 如果当前选中的画框在某页，则优先添加在该页
     if (selectedSlotId) {
       if (currentSpread.leftPage.slots.some((s) => s.id === selectedSlotId)) {
         targetSide = 'left';
@@ -1136,7 +1078,6 @@ export default function App() {
     const dataUrl = svgToDataUrl(stamp.svgContent);
     const stampPhotoId = `stamp_asset_${stamp.id}`;
 
-    // 将图章注册为虚拟资产，设置 isSystemStamp: true，彻底与照片托盘解耦
     const stampPhoto: UploadedPhoto = {
       id: stampPhotoId,
       assetId: stampPhotoId,
@@ -1180,28 +1121,19 @@ export default function App() {
       crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
     }, bookSpec.widthMm, bookSpec.heightMm);
 
-    const isLeft = targetSide === 'left';
-    const nextSpreads = spreads.map((spread, idx) => {
-      if (idx !== currentSpreadIndex) return spread;
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...spread[isLeft ? 'leftPage' : 'rightPage'],
-          slots: [...spread[isLeft ? 'leftPage' : 'rightPage'].slots, newSlot],
-        },
-      };
-    });
+    const targetPageId = targetSide === 'left' ? currentSpread.leftPage.id : currentSpread.rightPage.id;
+    const nextPages = updateSlotsInPage(pages, targetPageId, (slots) => [...slots, newSlot]);
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
     setSelectedSlotId(newSlot.id);
     setSelectedSlotIds([newSlot.id]);
     setActiveSide(targetSide);
-    setToastMessage(`已将「${stamp.name}」图章添加至${isLeft ? '左' : '右'}页`);
+    setToastMessage(`已将「${stamp.name}」图章添加至${targetSide === 'left' ? '左' : '右'}页`);
     setTimeout(() => setToastMessage(null), 2000);
   };
 
-  // 拖拽图章到画布精准落点放置
+  // 拖拽图章到画布精准落点放置 (写入 pages)
   const handleAddStampAtPosition = (pageId: string, stampId: string, positionPercent: { x: number; y: number }) => {
     const stamp = PRESET_STAMPS.find((s) => s.id === stampId);
     if (!stamp) return;
@@ -1243,7 +1175,6 @@ export default function App() {
     const hPercent = stamp.defaultHeightPercent || 22;
     const maxZ = targetPage.slots.reduce((max, s) => Math.max(max, s.zIndex || 1), 1);
 
-    // 将图章中心对齐到鼠标释放位置，并限制在安全边距内
     const leftX = Math.max(2, Math.min(98 - wPercent, positionPercent.x - wPercent / 2));
     const topY = Math.max(2, Math.min(98 - hPercent, positionPercent.y - hPercent / 2));
 
@@ -1261,19 +1192,10 @@ export default function App() {
       crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
     }, bookSpec.widthMm, bookSpec.heightMm);
 
-    const nextSpreads = spreads.map((spread, idx) => {
-      if (idx !== currentSpreadIndex) return spread;
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...spread[isLeft ? 'leftPage' : 'rightPage'],
-          slots: [...spread[isLeft ? 'leftPage' : 'rightPage'].slots, newSlot],
-        },
-      };
-    });
+    const nextPages = updateSlotsInPage(pages, pageId, (slots) => [...slots, newSlot]);
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
     setSelectedSlotId(newSlot.id);
     setSelectedSlotIds([newSlot.id]);
     setActiveSide(isLeft ? 'left' : 'right');
@@ -1281,46 +1203,29 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 2000);
   };
 
-  // 画框一键满屏 (占满整页 100% 宽高)
+  // 画框一键满屏 (占满整页 100% 宽高，写入 pages)
   const handleMakeFullScreen = (pageId: string, slotId: string) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
-
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) => {
-        if (s.id !== slotId) return s;
-        return normalizeSlot(
-          {
-            ...s,
-            x: 0,
-            y: 0,
-            width: 100,
-            height: 100,
-            xMm: 0,
-            yMm: 0,
-            widthMm: bookSpec.widthMm,
-            heightMm: bookSpec.heightMm,
-            rotation: 0,
-          },
-          bookSpec.widthMm,
-          bookSpec.heightMm
-        );
-      });
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
+    const nextPages = updateSlotInPages(pages, pageId, slotId, (s) =>
+      normalizeSlot(
+        {
+          ...s,
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 100,
+          xMm: 0,
+          yMm: 0,
+          widthMm: bookSpec.widthMm,
+          heightMm: bookSpec.heightMm,
+          rotation: 0,
         },
-      };
-    });
+        bookSpec.widthMm,
+        bookSpec.heightMm
+      )
+    );
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
     setToastMessage('已将照片画框一键满屏铺满整页');
     setTimeout(() => setToastMessage(null), 2000);
   };
@@ -1344,36 +1249,21 @@ export default function App() {
     }, 120);
   };
 
-  // 更新文本框内容
+  // 更新文本框内容 (写入 pages)
   const handleUpdateSlotText = (pageId: string, slotId: string, text: string) => {
-    const nextSpreads = spreads.map((spread) => {
-      const isLeft = spread.leftPage.id === pageId;
-      const isRight = spread.rightPage.id === pageId;
-
-      if (!isLeft && !isRight) return spread;
-
-      const targetPage = isLeft ? spread.leftPage : spread.rightPage;
-      const updatedSlots = targetPage.slots.map((s) => (s.id === slotId ? { ...s, text } : s));
-
-      return {
-        ...spread,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...targetPage,
-          slots: updatedSlots,
-        },
-      };
-    });
-
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    const nextPages = updateSlotInPages(pages, pageId, slotId, (s) => ({
+      ...s,
+      text,
+    }));
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 插入自定义图片框 (智能推断当前选中的画框所在页，或当前激活的页面：左页或右页)
+  // 插入自定义图片框 (写入 pages)
   const handleAddImageSlot = () => {
     const currentSpread = spreads[currentSpreadIndex];
     let targetSide: 'left' | 'right' = activeSide || 'left';
 
-    // 优先 1：如果当前有选中的画框，直接检查该画框属于左页还是右页
     if (selectedSlotId && currentSpread) {
       if (currentSpread.leftPage.slots.some((s) => s.id === selectedSlotId)) {
         targetSide = 'left';
@@ -1395,26 +1285,17 @@ export default function App() {
       placeholderText: '拖入图片',
     }, bookSpec.widthMm, bookSpec.heightMm);
 
-    const nextSpreads = spreads.map((s, idx) => {
-      if (idx !== currentSpreadIndex) return s;
-      const isLeft = targetSide === 'left';
-      return {
-        ...s,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...s[isLeft ? 'leftPage' : 'rightPage'],
-          slots: [...s[isLeft ? 'leftPage' : 'rightPage'].slots, newSlot],
-        },
-      };
-    });
+    const targetPageId = targetSide === 'left' ? currentSpread.leftPage.id : currentSpread.rightPage.id;
+    const nextPages = updateSlotsInPage(pages, targetPageId, (slots) => [...slots, newSlot]);
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
     setSelectedSlotId(newSlot.id);
     setSelectedSlotIds([newSlot.id]);
     setActiveSide(targetSide);
   };
 
-  // 插入自定义文字框 (智能推断当前选中的画框所在页，或当前激活的页面：左页或右页)
+  // 插入自定义文字框 (写入 pages)
   const handleAddTextSlot = () => {
     const currentSpread = spreads[currentSpreadIndex];
     let targetSide: 'left' | 'right' = activeSide || 'left';
@@ -1440,391 +1321,285 @@ export default function App() {
       placeholderText: '点两次输入文字',
     }, bookSpec.widthMm, bookSpec.heightMm);
 
-    const nextSpreads = spreads.map((s, idx) => {
-      if (idx !== currentSpreadIndex) return s;
-      const isLeft = targetSide === 'left';
-      return {
-        ...s,
-        [isLeft ? 'leftPage' : 'rightPage']: {
-          ...s[isLeft ? 'leftPage' : 'rightPage'],
-          slots: [...s[isLeft ? 'leftPage' : 'rightPage'].slots, newSlot],
-        },
-      };
-    });
+    const targetPageId = targetSide === 'left' ? currentSpread.leftPage.id : currentSpread.rightPage.id;
+    const nextPages = updateSlotsInPage(pages, targetPageId, (slots) => [...slots, newSlot]);
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
     setSelectedSlotId(newSlot.id);
     setSelectedSlotIds([newSlot.id]);
     setActiveSide(targetSide);
   };
 
-  // 应用单页版式到当前页 (左页/右页)
+  // 应用单页版式到当前页 (写入 pages)
   const handleApplyLayoutToCurrentPage = (
     slots: FrameSlot[],
-    targetPage: 'left' | 'right' | 'both'
+    targetPageSide: 'left' | 'right' | 'both'
   ) => {
-    const clonedSlots = slots.map((s, i) =>
-      normalizeSlot({
-        ...s,
-        id: `slot_${Date.now()}_${i}`,
-      }, bookSpec.widthMm, bookSpec.heightMm)
-    );
+    const leftPageIdx = currentSpreadIndex * 2;
+    const rightPageIdx = currentSpreadIndex * 2 + 1;
+    const nextPages = [...pages];
 
-    const nextSpreads = spreads.map((s, idx) => {
-      if (idx !== currentSpreadIndex) return s;
-
-      let nextLeft = s.leftPage;
-      let nextRight = s.rightPage;
-
-      if (targetPage === 'left' || targetPage === 'both') {
-        nextLeft = { ...nextLeft, slots: clonedSlots };
+    if (targetPageSide === 'left' || targetPageSide === 'both') {
+      if (leftPageIdx < nextPages.length) {
+        const clonedSlots = slots.map((s, i) =>
+          normalizeSlot({ ...s, id: `slot_${Date.now()}_${i}` }, bookSpec.widthMm, bookSpec.heightMm)
+        );
+        nextPages[leftPageIdx] = { ...nextPages[leftPageIdx], slots: clonedSlots, elements: clonedSlots };
       }
-      if (targetPage === 'right' || targetPage === 'both') {
-        nextRight = {
-          ...nextRight,
-          slots: slots.map((sl, i) =>
-            normalizeSlot({ ...sl, id: `slot_r_${Date.now()}_${i}` }, bookSpec.widthMm, bookSpec.heightMm)
-          ),
-        };
+    }
+    if (targetPageSide === 'right' || targetPageSide === 'both') {
+      if (rightPageIdx < nextPages.length) {
+        const clonedSlots = slots.map((sl, i) =>
+          normalizeSlot({ ...sl, id: `slot_r_${Date.now()}_${i}` }, bookSpec.widthMm, bookSpec.heightMm)
+        );
+        nextPages[rightPageIdx] = { ...nextPages[rightPageIdx], slots: clonedSlots, elements: clonedSlots };
       }
+    }
 
-      return {
-        ...s,
-        leftPage: nextLeft,
-        rightPage: nextRight,
-      };
-    });
-
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 应用跨页连通大片版式
+  // 应用跨页连通大片版式 (写入 pages)
   const handleApplySpreadLayout = (leftSlots: FrameSlot[], rightSlots: FrameSlot[]) => {
-    const clonedLeft = leftSlots.map((s, i) =>
-      normalizeSlot({
-        ...s,
-        id: `slot_sp_l_${Date.now()}_${i}`,
-      }, bookSpec.widthMm, bookSpec.heightMm)
-    );
-    const clonedRight = rightSlots.map((s, i) =>
-      normalizeSlot({
-        ...s,
-        id: `slot_sp_r_${Date.now()}_${i}`,
-      }, bookSpec.widthMm, bookSpec.heightMm)
-    );
+    const leftPageIdx = currentSpreadIndex * 2;
+    const rightPageIdx = currentSpreadIndex * 2 + 1;
+    const nextPages = [...pages];
 
-    const nextSpreads = spreads.map((s, idx) => {
-      if (idx !== currentSpreadIndex) return s;
-      return {
-        ...s,
-        leftPage: { ...s.leftPage, slots: clonedLeft },
-        rightPage: { ...s.rightPage, slots: clonedRight },
-      };
-    });
+    if (leftPageIdx < nextPages.length) {
+      const clonedLeft = leftSlots.map((s, i) =>
+        normalizeSlot({ ...s, id: `slot_sp_l_${Date.now()}_${i}` }, bookSpec.widthMm, bookSpec.heightMm)
+      );
+      nextPages[leftPageIdx] = { ...nextPages[leftPageIdx], slots: clonedLeft, elements: clonedLeft };
+    }
+    if (rightPageIdx < nextPages.length) {
+      const clonedRight = rightSlots.map((s, i) =>
+        normalizeSlot({ ...s, id: `slot_sp_r_${Date.now()}_${i}` }, bookSpec.widthMm, bookSpec.heightMm)
+      );
+      nextPages[rightPageIdx] = { ...nextPages[rightPageIdx], slots: clonedRight, elements: clonedRight };
+    }
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 清空指定单页上的所有照片
-  const handleClearPagePhotos = (page: 'left' | 'right') => {
-    const nextSpreads = spreads.map((s, idx) => {
-      if (idx !== currentSpreadIndex) return s;
-      if (page === 'left') {
-        return {
-          ...s,
-          leftPage: {
-            ...s.leftPage,
-            slots: s.leftPage.slots.map((sl) => ({ ...sl, photoId: undefined, crop: undefined })),
-          },
-        };
-      } else {
-        return {
-          ...s,
-          rightPage: {
-            ...s.rightPage,
-            slots: s.rightPage.slots.map((sl) => ({ ...sl, photoId: undefined, crop: undefined })),
-          },
-        };
-      }
-    });
+  // 清空指定单页上的所有照片 (写入 pages)
+  const handleClearPagePhotos = (pageSide: 'left' | 'right') => {
+    const pageIdx = currentSpreadIndex * 2 + (pageSide === 'left' ? 0 : 1);
+    if (pageIdx >= pages.length) return;
+    const pageId = pages[pageIdx].id;
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    const nextPages = updateSlotsInPage(pages, pageId, (slots) =>
+      slots.map((sl) => ({ ...sl, photoId: undefined, assetId: undefined, crop: undefined }))
+    );
+
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 应用背景颜色
+  // 应用背景颜色 (写入 pages)
   const handleApplyBackgroundColor = (
     color: string,
-    targetPage: 'left' | 'right' | 'both'
+    targetPageSide: 'left' | 'right' | 'both'
   ) => {
-    const nextSpreads = spreads.map((s, idx) => {
-      if (idx !== currentSpreadIndex) return s;
-      return {
-        ...s,
-        leftPage: {
-          ...s.leftPage,
-          backgroundColor:
-            targetPage === 'left' || targetPage === 'both' ? color : s.leftPage.backgroundColor,
-        },
-        rightPage: {
-          ...s.rightPage,
-          backgroundColor:
-            targetPage === 'right' || targetPage === 'both' ? color : s.rightPage.backgroundColor,
-        },
-      };
+    const leftPageIdx = currentSpreadIndex * 2;
+    const rightPageIdx = currentSpreadIndex * 2 + 1;
+
+    const nextPages = pages.map((page, idx) => {
+      if (idx === leftPageIdx && (targetPageSide === 'left' || targetPageSide === 'both')) {
+        return { ...page, backgroundColor: color };
+      }
+      if (idx === rightPageIdx && (targetPageSide === 'right' || targetPageSide === 'both')) {
+        return { ...page, backgroundColor: color };
+      }
+      return page;
     });
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 一键智能排版：将托盘中未用照片自动填充到画册的空白框中
+  // 一键智能排版：将托盘中未用照片自动填充到画册的空白框中 (写入 pages)
   const handleAutoLayout = () => {
     const unusedPhotos = photos.filter((p) => p.usedCount === 0);
-    const photoQueue = [...unusedPhotos, ...photos]; // 如果不够则循环使用
+    const photoQueue = [...unusedPhotos, ...photos];
     let photoIdx = 0;
 
-    const nextSpreads = spreads.map((spread) => {
-      const fillSlots = (slots: FrameSlot[]) =>
-        slots.map((slot) => {
-          if (slot.type === 'photo' && !slot.photoId && photoQueue.length > 0) {
-            const chosen = photoQueue[photoIdx % photoQueue.length];
-            photoIdx++;
-            return {
-              ...slot,
-              photoId: chosen.id,
-              crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
-            };
-          }
-          return slot;
-        });
+    const nextPages = pages.map((page) => {
+      const rawSlots = page.slots || page.elements || [];
+      const updatedSlots = rawSlots.map((slot) => {
+        if (slot.type === 'photo' && !slot.photoId && photoQueue.length > 0) {
+          const chosen = photoQueue[photoIdx % photoQueue.length];
+          photoIdx++;
+          return {
+            ...slot,
+            photoId: chosen.id,
+            assetId: chosen.id,
+            crop: { x: 50, y: 50, scale: 1.0, rotation: 0 },
+          };
+        }
+        return slot;
+      });
 
       return {
-        ...spread,
-        leftPage: { ...spread.leftPage, slots: fillSlots(spread.leftPage.slots) },
-        rightPage: { ...spread.rightPage, slots: fillSlots(spread.rightPage.slots) },
+        ...page,
+        slots: updatedSlots,
+        elements: updatedSlots,
       };
     });
 
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 一键清空作品中的所有照片
+  // 一键清空作品中的所有照片 (写入 pages)
   const handleClearAll = () => {
-    const nextSpreads = spreads.map((spread) => ({
-      ...spread,
-      leftPage: {
-        ...spread.leftPage,
-        slots: spread.leftPage.slots.map((s) => ({
-          ...s,
-          photoId: undefined,
-          crop: undefined,
-        })),
-      },
-      rightPage: {
-        ...spread.rightPage,
-        slots: spread.rightPage.slots.map((s) => ({
-          ...s,
-          photoId: undefined,
-          crop: undefined,
-        })),
-      },
-    }));
-
-    setSpreads(nextSpreads);
-    pushHistory(nextSpreads);
-  };
-
-  // 规范化并重新计算全书每个跨页的真实页码 (0 封面, 1 扉页, 2-3, 4-5, 6-7, ...)
-  const reindexAllSpreads = (spreadList: SpreadModel[]): SpreadModel[] => {
-    let currentPageCounter = 0;
-    return spreadList.map((s, idx) => {
-      const isCover = s.isCover || idx === 0;
-      if (isCover) {
-        return {
-          ...s,
-          spreadIndex: idx,
-          isCover: true,
-          name: '封面',
-          leftPage: {
-            ...s.leftPage,
-            pageNumber: 0,
-          },
-          rightPage: {
-            ...s.rightPage,
-            pageNumber: 0,
-          },
-        };
-      }
-
-      if (idx === 1) {
-        // 扉页：左侧空白衬纸 (0 / FRONT INSIDE)，右侧第 1 页
-        currentPageCounter = 1;
-        return {
-          ...s,
-          spreadIndex: idx,
-          name: '第 1 页 (扉页)',
-          leftPage: {
-            ...s.leftPage,
-            pageNumber: 0,
-          },
-          rightPage: {
-            ...s.rightPage,
-            pageNumber: 1,
-          },
-        };
-      }
-
-      // 后续常规双跨页：连续递增页码 (2-3, 4-5, 6-7, 8-9, ...)
-      const leftPageNum = currentPageCounter + 1;
-      const rightPageNum = currentPageCounter + 2;
-      currentPageCounter += 2;
-
-      return {
+    const nextPages = pages.map((page) => {
+      const rawSlots = page.slots || page.elements || [];
+      const updated = rawSlots.map((s) => ({
         ...s,
-        spreadIndex: idx,
-        name: `第 ${leftPageNum}-${rightPageNum} 跨页`,
-        leftPage: {
-          ...s.leftPage,
-          pageNumber: leftPageNum,
-        },
-        rightPage: {
-          ...s.rightPage,
-          pageNumber: rightPageNum,
-        },
+        photoId: undefined,
+        assetId: undefined,
+        crop: undefined,
+      }));
+      return {
+        ...page,
+        slots: updated,
+        elements: updated,
       };
     });
+
+    setPages(nextPages);
+    pushHistory(nextPages);
   };
 
-  // 新增跨页 (支持任意位置插入，插入后全局自动重排连续页码)
+  // 新增跨页 (支持任意位置插入，使用 reindexPagesForSpreads 保证 pages 唯一真实数据源)
   const handleAddSpread = (insertAfterIndex?: number) => {
-    const insertIdx =
-      insertAfterIndex !== undefined ? insertAfterIndex + 1 : spreads.length;
+    const insertSpreadIdx =
+      insertAfterIndex !== undefined ? insertAfterIndex + 1 : Math.floor(pages.length / 2);
+    const insertPageIdx = insertSpreadIdx * 2;
 
-    const newSpread: SpreadModel = {
-      id: `spread_${Date.now()}`,
-      spreadIndex: insertIdx,
-      name: `新跨页`,
-      leftPage: {
-        id: `p_left_${Date.now()}`,
-        pageNumber: 0,
-        isLeft: true,
-        backgroundColor: '#FFFFFF',
-        slots: [
-          normalizeSlot({
-            id: `slot_left_${Date.now()}`,
-            type: 'photo',
-            x: 8,
-            y: 8,
-            width: 84,
-            height: 84,
-            pixelLabel: '1700x1700',
-            placeholderText: '拖入图片',
-          }, bookSpec.widthMm, bookSpec.heightMm),
-        ],
-      },
-      rightPage: {
-        id: `p_right_${Date.now()}`,
-        pageNumber: 0,
-        isLeft: false,
-        backgroundColor: '#FFFFFF',
-        slots: [
-          normalizeSlot({
-            id: `slot_right_${Date.now()}_1`,
-            type: 'photo',
-            x: 8,
-            y: 10,
-            width: 40,
-            height: 80,
-            pixelLabel: '850x1620',
-            placeholderText: '拖入图片',
-          }, bookSpec.widthMm, bookSpec.heightMm),
-          normalizeSlot({
-            id: `slot_right_${Date.now()}_2`,
-            type: 'photo',
-            x: 52,
-            y: 10,
-            width: 40,
-            height: 80,
-            pixelLabel: '850x1620',
-            placeholderText: '拖入图片',
-          }, bookSpec.widthMm, bookSpec.heightMm),
-        ],
-      },
+    const newLeftPage: PageModel = {
+      id: `p_left_${Date.now()}`,
+      pageNumber: 0,
+      faceType: 'inside_left',
+      isLeft: true,
+      backgroundColor: '#FFFFFF',
+      slots: [
+        normalizeSlot({
+          id: `slot_left_${Date.now()}`,
+          type: 'photo',
+          x: 8,
+          y: 8,
+          width: 84,
+          height: 84,
+          pixelLabel: '1700x1700',
+          placeholderText: '拖入图片',
+        }, bookSpec.widthMm, bookSpec.heightMm),
+      ],
     };
 
-    const nextSpreads = [...spreads];
-    nextSpreads.splice(insertIdx, 0, newSpread);
-
-    // 全局重新计算并连续编排页码
-    const reindexed = reindexAllSpreads(nextSpreads);
-
-    setSpreads(reindexed);
-    pushHistory(reindexed);
-    setCurrentSpreadIndex(insertIdx);
-  };
-
-  // 删除跨页 (删除后全局自动重排连续页码)
-  const handleDeleteSpread = (index: number) => {
-    if (spreads.length <= 1) return;
-    const filtered = spreads.filter((_, i) => i !== index);
-    const reindexed = reindexAllSpreads(filtered);
-
-    setSpreads(reindexed);
-    pushHistory(reindexed);
-    setCurrentSpreadIndex(Math.min(currentSpreadIndex, reindexed.length - 1));
-  };
-
-  // 复制跨页 (复制后全局自动重排连续页码)
-  const handleDuplicateSpread = (index: number) => {
-    const target = spreads[index];
-    if (!target) return;
-    const duplicated: SpreadModel = {
-      ...target,
-      id: `spread_${Date.now()}`,
-      spreadIndex: index + 1,
-      leftPage: {
-        ...target.leftPage,
-        id: `p_left_${Date.now()}`,
-        slots: target.leftPage.slots.map((s) => ({
-          ...s,
-          id: `slot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        })),
-      },
-      rightPage: {
-        ...target.rightPage,
-        id: `p_right_${Date.now()}`,
-        slots: target.rightPage.slots.map((s) => ({
-          ...s,
-          id: `slot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        })),
-      },
+    const newRightPage: PageModel = {
+      id: `p_right_${Date.now()}`,
+      pageNumber: 0,
+      faceType: 'inside_right',
+      isLeft: false,
+      backgroundColor: '#FFFFFF',
+      slots: [
+        normalizeSlot({
+          id: `slot_right_${Date.now()}_1`,
+          type: 'photo',
+          x: 8,
+          y: 10,
+          width: 40,
+          height: 80,
+          pixelLabel: '850x1620',
+          placeholderText: '拖入图片',
+        }, bookSpec.widthMm, bookSpec.heightMm),
+        normalizeSlot({
+          id: `slot_right_${Date.now()}_2`,
+          type: 'photo',
+          x: 52,
+          y: 10,
+          width: 40,
+          height: 80,
+          pixelLabel: '850x1620',
+          placeholderText: '拖入图片',
+        }, bookSpec.widthMm, bookSpec.heightMm),
+      ],
     };
 
-    const nextSpreads = [...spreads];
-    nextSpreads.splice(index + 1, 0, duplicated);
-    const reindexed = reindexAllSpreads(nextSpreads);
+    const nextPages = [...pages];
+    nextPages.splice(insertPageIdx, 0, newLeftPage, newRightPage);
+    const reindexed = reindexPagesForSpreads(nextPages);
 
-    setSpreads(reindexed);
+    setPages(reindexed);
     pushHistory(reindexed);
-    setCurrentSpreadIndex(index + 1);
+    setCurrentSpreadIndex(insertSpreadIdx);
   };
 
-  // 跨页拖拽重排 (重排后全局自动重排连续页码)
+  // 删除跨页 (删除后全局自动重排连续页码与 faceType)
+  const handleDeleteSpread = (spreadIndex: number) => {
+    if (pages.length <= 4) return; // 至少保留封面 + 1 组内页跨页
+    const pageIdx = spreadIndex * 2;
+    const nextPages = [...pages];
+    nextPages.splice(pageIdx, 2);
+    const reindexed = reindexPagesForSpreads(nextPages);
+
+    setPages(reindexed);
+    pushHistory(reindexed);
+    setCurrentSpreadIndex(Math.min(currentSpreadIndex, Math.floor(reindexed.length / 2) - 1));
+  };
+
+  // 复制跨页 (复制后全局自动重排连续页码与 faceType)
+  const handleDuplicateSpread = (spreadIndex: number) => {
+    const pageIdx = spreadIndex * 2;
+    const rawLeft = pages[pageIdx];
+    const rawRight = pages[pageIdx + 1];
+    if (!rawLeft || !rawRight) return;
+
+    const dupLeft: PageModel = {
+      ...rawLeft,
+      id: `p_left_${Date.now()}`,
+      slots: (rawLeft.slots || []).map((s) => ({
+        ...s,
+        id: `slot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      })),
+    };
+    const dupRight: PageModel = {
+      ...rawRight,
+      id: `p_right_${Date.now()}`,
+      slots: (rawRight.slots || []).map((s) => ({
+        ...s,
+        id: `slot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      })),
+    };
+
+    const nextPages = [...pages];
+    nextPages.splice(pageIdx + 2, 0, dupLeft, dupRight);
+    const reindexed = reindexPagesForSpreads(nextPages);
+
+    setPages(reindexed);
+    pushHistory(reindexed);
+    setCurrentSpreadIndex(spreadIndex + 1);
+  };
+
+  // 跨页拖拽重排 (重排后全局自动重排连续页码与 faceType)
   const handleReorderSpreads = (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= spreads.length || toIndex >= spreads.length) {
+    const totalSpreads = Math.floor(pages.length / 2);
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= totalSpreads || toIndex >= totalSpreads) {
       return;
     }
-    const nextSpreads = [...spreads];
-    const [moved] = nextSpreads.splice(fromIndex, 1);
-    nextSpreads.splice(toIndex, 0, moved);
-    const reindexed = reindexAllSpreads(nextSpreads);
+    const fromPageIdx = fromIndex * 2;
+    const toPageIdx = toIndex * 2;
 
-    setSpreads(reindexed);
+    const nextPages = [...pages];
+    const [pLeft, pRight] = nextPages.splice(fromPageIdx, 2);
+    nextPages.splice(toPageIdx, 0, pLeft, pRight);
+    const reindexed = reindexPagesForSpreads(nextPages);
+
+    setPages(reindexed);
     pushHistory(reindexed);
     setCurrentSpreadIndex(toIndex);
   };
@@ -1852,12 +1627,17 @@ export default function App() {
         onOpenMultiPage={() => setIsMultiPageOpen(true)}
         onAddImageSlot={handleAddImageSlot}
         onAddTextSlot={handleAddTextSlot}
-        totalPageCount={bookSpec.defaultPages}
+        totalPageCount={pages.length}
         hasSelectedSlots={selectedSlotIds.length > 0 || !!selectedSlotId}
         onLayerOrder={handleLayerOrder}
         onAutoFit={handleAutoFitToScreen}
         onSaveProject={handleSaveProject}
         onAddToCart={handleAddToCart}
+        onOpenProjectManager={() => setIsProjectManagerOpen(true)}
+        autoSaveStatus={saveStatus}
+        estimatedPrice={currentPriceBreakdown.total}
+        currencySymbol="￥"
+        userRoleLabel={currentPriceBreakdown.tierDescription}
       />
 
       {/* 主体工作区 (最左侧窄栏导航 + 二级抽屉面板 + 中央双页展开画板) */}
@@ -2001,6 +1781,15 @@ export default function App() {
         bookSpec={bookSpec}
         photos={photos}
         projectName={projectName}
+      />
+
+      {/* 多作品管理中心模态框 (支持代理商多工程管理、快速复制、重命名、价格计算) */}
+      <ProjectManagerModal
+        isOpen={isProjectManagerOpen}
+        currentProjectId={currentProjectId}
+        onClose={() => setIsProjectManagerOpen(false)}
+        onSelectProject={handleSelectProject}
+        onToast={showToast}
       />
 
       {/* 全局 SVG 遮罩定义 */}

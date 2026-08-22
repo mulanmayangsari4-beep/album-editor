@@ -44,6 +44,11 @@ interface HeaderProps {
   onAutoFit?: () => void;
   onSaveProject?: () => void;
   onAddToCart?: () => void;
+  onOpenProjectManager?: () => void;
+  autoSaveStatus?: 'idle' | 'saving' | 'saved' | 'error';
+  estimatedPrice?: number;
+  currencySymbol?: string;
+  userRoleLabel?: string;
 }
 
 // 1:1 米莫印品 排序顶部主图标 (两个重叠圆角方块：左上后方、右下前方实白)
@@ -217,6 +222,11 @@ export const Header: React.FC<HeaderProps> = ({
   onSaveProject,
   onAddToCart,
   onSelectSpec,
+  onOpenProjectManager,
+  autoSaveStatus = 'saved',
+  estimatedPrice,
+  currencySymbol = '￥',
+  userRoleLabel,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(projectName);
@@ -278,17 +288,24 @@ export const Header: React.FC<HeaderProps> = ({
       id="top-editor-header"
       className="h-12 bg-white border-b border-[#e0e2e6] px-3 flex items-center justify-between select-none z-30 shrink-0 text-[#3c4043] shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
     >
-      {/* 左侧：品牌 Logo + 项目名 + 规格下拉 + 页数 */}
-      <div className="flex items-center space-x-3 shrink-0">
-        {/* 品牌酒红小标 */}
-        <div className="flex items-center space-x-1.5 cursor-pointer">
-          <div className="w-6 h-6 rounded bg-[#76383d] flex items-center justify-center text-white font-bold text-xs shadow-xs">
+      {/* 左侧：品牌 Logo + 作品管理入口 + 项目名 + 规格下拉 + 自动保存状态 + 预估价格 */}
+      <div className="flex items-center space-x-2.5 shrink-0">
+        {/* 作品管理入口按钮 */}
+        <button
+          onClick={onOpenProjectManager}
+          className="flex items-center space-x-1.5 px-2.5 py-1 bg-neutral-100 hover:bg-neutral-200/80 rounded-md text-xs font-medium text-neutral-800 transition-colors cursor-pointer border border-neutral-200"
+          title="打开多作品管理中心 (切换/新建/复制工程)"
+        >
+          <div className="w-4 h-4 rounded bg-[#76383d] flex items-center justify-center text-white font-bold text-[10px] shadow-2xs">
             m
           </div>
-        </div>
+          <span className="font-semibold">作品管理</span>
+        </button>
+
+        <div className="w-[1px] h-4 bg-[#e0e2e6]" />
 
         {/* 项目名称 (带铅笔编辑) */}
-        <div className="flex items-center space-x-1 border-r border-[#e0e2e6] pr-3">
+        <div className="flex items-center space-x-1 border-r border-[#e0e2e6] pr-2.5">
           {isEditingTitle ? (
             <input
               type="text"
@@ -302,20 +319,40 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <button
               onClick={() => setIsEditingTitle(true)}
-              className="flex items-center space-x-1 hover:bg-neutral-100 px-1.5 py-1 rounded text-xs text-[#202124] font-medium transition-colors group cursor-pointer"
+              className="flex items-center space-x-1 hover:bg-neutral-100 px-1.5 py-1 rounded text-xs text-[#202124] font-medium transition-colors group cursor-pointer max-w-[180px]"
               title="点击修改作品名称"
             >
-              <Edit2 className="w-3 h-3 text-neutral-400 group-hover:text-neutral-700" />
-              <span>{projectName}</span>
+              <Edit2 className="w-3 h-3 text-neutral-400 group-hover:text-neutral-700 shrink-0" />
+              <span className="truncate">{projectName}</span>
             </button>
           )}
         </div>
 
+        {/* 自动保存状态指示 */}
+        <div className="flex items-center space-x-1 text-[11px] text-neutral-400">
+          {autoSaveStatus === 'saving' ? (
+            <span className="flex items-center gap-1 text-amber-600 font-normal animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              保存中...
+            </span>
+          ) : autoSaveStatus === 'error' ? (
+            <span className="flex items-center gap-1 text-rose-600 font-normal">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              保存失败
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-emerald-600 font-normal" title="所有修改已自动同步保存至本地工程库">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              已保存
+            </span>
+          )}
+        </div>
+
         {/* 规格标签与下拉菜单 */}
-        <div className="relative">
+        <div className="relative border-l border-[#e0e2e6] pl-2.5">
           <button
             onClick={() => setShowSpecDropdown(!showSpecDropdown)}
-            className="flex items-center space-x-1.5 text-xs text-[#3c4043] hover:text-[#202124] hover:bg-neutral-100 px-2 py-1 rounded transition-colors cursor-pointer"
+            className="flex items-center space-x-1 text-xs text-[#3c4043] hover:text-[#202124] hover:bg-neutral-100 px-2 py-1 rounded transition-colors cursor-pointer"
           >
             <span>{bookSpec.name} {bookSpec.widthMm / 10} x {bookSpec.heightMm / 10}cm</span>
             <ChevronDown className="w-3 h-3 text-neutral-400" />
@@ -365,6 +402,17 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="text-xs bg-[#f1f3f4] text-[#5f6368] px-2 py-0.5 rounded border border-[#dadce0] font-mono">
           页数: {totalPageCount}P
         </div>
+
+        {/* 实时结算价徽标 (价格计算引擎驱动，解耦规则) */}
+        {estimatedPrice !== undefined && (
+          <div
+            className="flex items-center space-x-1 text-xs bg-amber-50 text-amber-900 px-2 py-0.5 rounded border border-amber-200 font-medium"
+            title={`预估结算金额：${currencySymbol}${estimatedPrice.toFixed(2)}${userRoleLabel ? ` (${userRoleLabel})` : ''}`}
+          >
+            <span className="text-[11px] text-amber-700">预估:</span>
+            <span className="font-semibold text-amber-800">{currencySymbol}{estimatedPrice.toFixed(2)}</span>
+          </div>
+        )}
       </div>
 
       {/* 中间快捷设计工具条 (紧凑精致) */}
